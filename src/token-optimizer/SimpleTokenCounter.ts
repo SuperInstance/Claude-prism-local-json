@@ -55,11 +55,11 @@
  * Determines if content is primarily code or natural language:
  *
  * Code Indicators (multiple must match):
- * 1. Function/class definitions: (function|class|interface|type)\s+\w+
- * 2. Import/export statements: (import|export)\s+.*from\s+['"].+['"]
- * 3. Code blocks with braces: \{\s*\n.*\n\s*\}
- * 4. Array/object literals: (\[[\s\S]*\]|\{[\s\S]*\})
- * 5. Common operators: [=+\-*/<>!&|]{2,}
+ * 1. Function/class definitions
+ * 2. Import/export statements
+ * 3. Code blocks with braces
+ * 4. Array/object literals
+ * 5. Common operators (repeated)
  *
  * Detection Logic:
  * - Count matches for each pattern
@@ -88,23 +88,15 @@
  *    - Why: Emails have special tokenization
  *
  * Code Estimation:
- * 1. Start with base: chars / 3
- * 2. Count code elements:
- *    - Keywords: function, class, const, let, var, if, else, etc.
- *    - Operators: {}, (), [], ;, =, +, -, *, /, etc.
- *    - Strings: "..." or '...' or `...`
- *    - Comments: //... or /*...*/
- * 3. Recalculate with accurate counts:
- *    - Keywords: ~1 token each
- *    - Operators: ~1 token each
- *    - Strings: ~5-10 tokens each (variable, depends on length)
- *    - Comments: ~4 chars/token (natural language)
- * 4. Formula: base - pattern_overcount + accurate_counts
+ * 1. Start with base: chars divided by 3
+ * 2. Count code elements like keywords, operators, strings, comments
+ * 3. Recalculate with accurate counts
+ * 4. Apply formula to adjust for patterns
  *
  * Why Pattern-Based Adjustment?
  * - Simple char division overcounts keywords
- * - "function" is 1 token, not 8/3 = 2.67 tokens
- * - Operators are 1 token each, not 1/3 tokens
+ * - Keywords are typically 1 token each
+ * - Operators are 1 token each
  * - Provides better accuracy for code
  *
  * ============================================================================
@@ -112,17 +104,17 @@
  * ============================================================================
  *
  * Natural Language:
- * - Simple text: ±10% accuracy
- * - With URLs/emails: ±15% accuracy
- * - Technical terms: ±20% accuracy (may split differently)
+ * - Simple text: within 10% accuracy
+ * - With URLs/emails: within 15% accuracy
+ * - Technical terms: within 20% accuracy
  *
  * Code:
- * - Simple code: ±15% accuracy
- * - Complex code: ±20% accuracy
- * - Heavily commented: ±25% accuracy (comments are natural language)
+ * - Simple code: within 15% accuracy
+ * - Complex code: within 20% accuracy
+ * - Heavily commented: within 25% accuracy
  *
  * Comparison to Actual Tokenizers:
- * - tiktoken (GPT-4): Our estimates are within 10-20%
+ * - tiktoken (GPT-4): within 10-20% accuracy
  * - claude-tokenizer: Similar accuracy
  * - Consistently underestimate (conservative for budgeting)
  *

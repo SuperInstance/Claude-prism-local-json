@@ -82,6 +82,7 @@ import type { PrismConfig } from '../config/types/index.js';
 import { createPrismError, ErrorCode } from '../core/types/index.js';
 import { ProgressReporter } from './ProgressReporter.js';
 import { IndexStorage } from './IndexStorage.js';
+import type { D1IndexStorage } from './D1IndexStorage.js';
 
 /**
  * Indexing options
@@ -168,7 +169,7 @@ export class IndexerOrchestrator {
   private embeddings: IEmbeddingService;
   private vectorDB: IVectorDatabase;
   private config: PrismConfig;
-  private storage: IndexStorage;
+  private storage: IndexStorage | D1IndexStorage;
   private progress: ProgressReporter;
   private progressCallback?: ProgressCallback;
 
@@ -177,15 +178,83 @@ export class IndexerOrchestrator {
     parser: IIndexer,
     embeddings: IEmbeddingService,
     vectorDB: IVectorDatabase,
-    config: PrismConfig
+    config: PrismConfig,
+    storage?: IndexStorage | D1IndexStorage
   ) {
     this.fileSystem = fileSystem;
     this.parser = parser;
     this.embeddings = embeddings;
     this.vectorDB = vectorDB;
     this.config = config;
-    this.storage = new IndexStorage(config);
+    this.storage = storage || new IndexStorage(config);
     this.progress = new ProgressReporter();
+  }
+
+  /**
+   * Check if using D1-based storage
+   *
+   * @returns true if using D1IndexStorage, false otherwise
+   */
+  private isD1Storage(): boolean {
+    // Check if storage has D1-specific methods
+    return 'needsReindexing' in this.storage &&
+           'detectDeletedFiles' in this.storage &&
+           'calculateChecksum' in this.storage;
+  }
+
+  /**
+   * Calculate SHA-256 checksum
+   *
+   * Uses native Web Crypto API for consistent hashing across platforms.
+   *
+   * @param content - Content to hash
+   * @returns Hex-encoded SHA-256 hash
+   */
+  private async calculateChecksum(content: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(content);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
+   * Handle deleted files
+   *
+   * Detects files that were previously indexed but no longer exist,
+   * marks them as deleted, and triggers cleanup.
+   *
+   * @param currentFiles - Current file paths in codebase
+   */
+  private async handleDeletedFiles(currentFiles: string[]): Promise<void> {
+    if (!this.isD1Storage()) {
+      // Skip deleted file detection for in-memory storage
+      return;
+    }
+
+    try {
+      const d1Storage = this.storage as D1IndexStorage;
+      const currentPaths = new Set(currentFiles);
+
+      // Detect deleted files
+      const deleted = await d1Storage.detectDeletedFiles(currentPaths);
+
+      if (deleted.length > 0) {
+        console.log(`Detected ${deleted.length} deleted files, marking for cleanup...`);
+
+        // Mark each deleted file
+        for (const path of deleted) {
+          await d1Storage.markFileDeleted(path);
+        }
+
+        // Cleanup deleted file chunks
+        const cleaned = await d1Storage.cleanupDeletedFiles();
+        console.log(`Cleaned up ${cleaned} deleted files`);
+      }
+    } catch (error) {
+      console.error('Failed to handle deleted files:', error);
+      // Don't fail the entire indexing process if cleanup fails
+    }
   }
 
   /**
@@ -216,13 +285,13 @@ export class IndexerOrchestrator {
    * ```typescript
    * const result = await orchestrator.indexDirectory('/path/to/code', {
    *   include: ['*.ts', '*.js'],
-   *   exclude: ['**/*.test.ts', '**/node_modules/**'],
+   *   exclude: ['.test.ts', 'node_modules'],
    *   incremental: true,
-   *   onProgress: (pct, msg) => console.log(`${pct}%: ${msg}`)
+   *   onProgress: (pct, msg) => console.log(pct + '%: ' + msg)
    * });
    *
-   * console.log(`Indexed ${result.files} files, ${result.chunks} chunks`);
-   * console.log(`Took ${result.duration}ms (${result.summary.filesPerSecond} files/sec)`);
+   * console.log('Indexed ' + result.files + ' files, ' + result.chunks + ' chunks');
+   * console.log('Took ' + result.duration + 'ms');
    * ```
    */
   async indexDirectory(path: string, options: IndexOptions = {}): Promise<IndexResult> {
@@ -247,6 +316,11 @@ export class IndexerOrchestrator {
       // Step 1: Collect files
       const files = await this.collectFiles(path, mergedOptions);
       this.reportProgress(5, `Found ${files.length} files`);
+
+      // Handle deleted files (incremental indexing)
+      if (mergedOptions.incremental) {
+        await this.handleDeletedFiles(files);
+      }
 
       // Filter for incremental updates
       const filesToIndex = mergedOptions.incremental
@@ -397,10 +471,20 @@ export class IndexerOrchestrator {
    * ============================================================================
    *
    * Implements incremental indexing by comparing file modification times
-   * against stored metadata from previous indexing runs.
+   * and SHA-256 checksums against stored metadata from previous indexing runs.
    *
    * HOW IT WORKS:
-   * 1. For each file, get last modified time from index metadata
+   *
+   * For D1IndexStorage (SHA-256 + mtime hybrid):
+   * 1. Calculate SHA-256 checksum of file content
+   * 2. Get current file modification time from filesystem
+   * 3. Use D1IndexStorage.needsReindexing() which implements:
+   *    - Fast path: mtime unchanged → skip
+   *    - Verification: mtime changed + checksum changed → reindex
+   *    - Git operation: mtime changed + checksum unchanged → skip
+   *
+   * For IndexStorage (mtime-only):
+   * 1. Get last modified time from index metadata
    * 2. Get current file modification time from filesystem
    * 3. If current <= stored, file hasn't changed → skip
    * 4. If current > stored or no metadata → file changed/new → index
@@ -411,29 +495,50 @@ export class IndexerOrchestrator {
    * - With incremental: reindex 10 files (2 seconds)
    * - Speedup: ~90x for typical workflows
    *
-   * LIMITATIONS:
-   * - Only tracks modification time, not content hash
-   * - Can miss changes if mtime is manually altered
-   * - TODO: Add SHA-256 hashing for content verification
+   * SHA-256 ADVANTAGES:
+   * - Accurate detection even when mtime is unreliable (git operations, etc)
+   * - Content-based verification prevents false positives
+   * - Handles git checkout, rebase, cherry-pick correctly
    *
    * @param files - All discovered file paths
    * @returns Filtered array of files that need (re)indexing
    *
-   * @see IndexStorage.getLastModified() for metadata retrieval
+   * @see D1IndexStorage.needsReindexing() for SHA-256 based detection
+   * @see IndexStorage.getLastModified() for mtime-only detection
    */
   private async filterUnchangedFiles(files: string[]): Promise<string[]> {
     const unchanged: string[] = [];
 
     for (const file of files) {
-      const lastModified = await this.storage.getLastModified(file);
-      if (lastModified) {
+      if (this.isD1Storage()) {
+        // Use SHA-256 based change detection (D1IndexStorage)
         try {
+          const content = await this.fileSystem.readFile(file);
+          const checksum = await this.calculateChecksum(content);
           const stats = await this.fileSystem.getStats(file);
-          if (stats.modified <= lastModified) {
+          const currentModified = stats.modified.getTime();
+
+          const d1Storage = this.storage as D1IndexStorage;
+          const needsReindex = await d1Storage.needsReindexing(file, checksum, currentModified);
+
+          if (!needsReindex) {
             unchanged.push(file);
           }
         } catch {
-          // If we can't stat, include it
+          // If we can't read/calc checksum, include it
+        }
+      } else {
+        // Use mtime-only change detection (IndexStorage)
+        const lastModified = await this.storage.getLastModified(file);
+        if (lastModified) {
+          try {
+            const stats = await this.fileSystem.getStats(file);
+            if (stats.modified <= lastModified) {
+              unchanged.push(file);
+            }
+          } catch {
+            // If we can't stat, include it
+          }
         }
       }
     }
@@ -522,20 +627,59 @@ export class IndexerOrchestrator {
   /**
    * Update index metadata after successful indexing
    *
+   * Stores file modification times and SHA-256 checksums for incremental indexing.
+   * For D1IndexStorage, also stores checksums for accurate change detection.
+   *
    * @param files - Files that were indexed
    */
   private async updateIndexMetadata(files: string[]): Promise<void> {
     const now = new Date();
 
-    for (const file of files) {
-      await this.storage.setLastModified(file, now);
-    }
+    if (this.isD1Storage()) {
+      // Use D1IndexStorage with SHA-256 checksums
+      const d1Storage = this.storage as D1IndexStorage;
 
-    await this.storage.saveIndex({
-      lastUpdated: now,
-      filesIndexed: files.length,
-      chunksIndexed: this.progress.getFilesProcessed(),
-    });
+      for (const file of files) {
+        try {
+          // Read file content for checksum
+          const content = await this.fileSystem.readFile(file);
+          const checksum = await this.calculateChecksum(content);
+
+          // Get file stats
+          const stats = await this.fileSystem.getStats(file);
+          const fileSize = stats.size;
+          const lastModified = stats.modified.getTime();
+
+          // Get chunk count from progress reporter
+          const chunkCount = this.progress.getChunksForFile(file);
+
+          // Store in D1 with checksum
+          await d1Storage.setFileRecord(file, checksum, fileSize, lastModified, chunkCount);
+        } catch (error) {
+          console.error(`Failed to update metadata for ${file}:`, error);
+        }
+      }
+
+      // Save index metadata
+      await d1Storage.saveIndex({
+        indexId: 'default',
+        lastUpdated: now,
+        filesIndexed: files.length,
+        chunksIndexed: this.progress.getFilesProcessed(),
+        version: '0.2.0',
+      });
+    } else {
+      // Use IndexStorage (mtime-only)
+      for (const file of files) {
+        await this.storage.setLastModified(file, now);
+      }
+
+      await this.storage.saveIndex({
+        lastUpdated: now,
+        filesIndexed: files.length,
+        chunksIndexed: this.progress.getFilesProcessed(),
+      });
+    }
   }
 
   /**

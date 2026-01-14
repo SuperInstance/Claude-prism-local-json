@@ -221,6 +221,17 @@ export class ProgressReporter {
   }
 
   /**
+   * Get number of chunks for a specific file
+   *
+   * @param filePath - File path to look up
+   * @returns Number of chunks for the file, or 0 if not found
+   */
+  getChunksForFile(filePath: string): number {
+    const fileEntry = this.fileHistory.find(f => f.path === filePath);
+    return fileEntry?.chunks || 0;
+  }
+
+  /**
    * Get formatted ETA string
    *
    * @returns Human-readable ETA

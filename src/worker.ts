@@ -15,6 +15,7 @@
  */
 
 import type { Env } from './types/worker.js';
+import type { ExportedHandler } from '@cloudflare/workers-types';
 
 // ============================================================================
 // IMPORTS
@@ -138,7 +139,8 @@ class WorkerRouter {
     }
 
     // Try prefix match for dynamic routes
-    for (const [routePath, routeHandler] of methodRoutes.entries()) {
+    const routes = Array.from(methodRoutes.entries());
+    for (const [routePath, routeHandler] of routes) {
       if (this.matchRoute(routePath, path)) {
         return routeHandler(request, { env, request });
       }
@@ -219,8 +221,8 @@ async function healthCheck(request: Request, ctx: RequestContext): Promise<Respo
  *   "path": "/path/to/code",
  *   "options": {
  *     "incremental": true,
- *     "include": ["**/*.ts", "**/*.js"],
- *     "exclude": ["**/node_modules/**"]
+ *     "include": ["*.ts", "*.js"],
+ *     "exclude": ["node_modules"]
  *   }
  * }
  */

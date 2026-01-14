@@ -364,8 +364,8 @@ export interface QueryContext {
  * Higher limits = slower searches but more comprehensive results.
  *
  * **Filtering**:
- * - `pathFilter`: Glob pattern for file paths (e.g., "src/**/*.ts")
- * - `languageFilter`: Only results for specific language
+ * - pathFilter: Glob pattern for file paths
+ * - languageFilter: Only results for specific language
  * - Filters are applied before ranking (affects which chunks are scored)
  *
  * **Score Breakdown**:
