@@ -36,6 +36,83 @@ export const CONFIG = {
 } as const;
 
 // ============================================================================
+// Logging Utilities
+// ============================================================================
+
+export enum LogLevel {
+  ERROR = 0,
+  WARN = 1,
+  INFO = 2,
+  DEBUG = 3,
+}
+
+let currentLogLevel = LogLevel.INFO;
+
+/**
+ * Set the global log level
+ * @param level - Log level to set
+ */
+export function setLogLevel(level: LogLevel | string): void {
+  if (typeof level === 'string') {
+    const upper = level.toUpperCase();
+    currentLogLevel = LogLevel[upper as keyof typeof LogLevel] ?? LogLevel.INFO;
+  } else {
+    currentLogLevel = level;
+  }
+}
+
+/**
+ * Set log level from environment variable string
+ * @param envLevel - Log level from environment (error, warn, info, debug)
+ */
+export function setLogLevelFromEnv(envLevel?: string): void {
+  if (!envLevel) return;
+  setLogLevel(envLevel);
+}
+
+/**
+ * Logger class for leveled logging
+ */
+export class Logger {
+  constructor(private context: string) {}
+
+  /** Log debug message (only in debug mode) */
+  debug(...args: unknown[]): void {
+    if (currentLogLevel >= LogLevel.DEBUG) {
+      console.debug(`[${this.context}]`, ...args);
+    }
+  }
+
+  /** Log info message (info and above) */
+  info(...args: unknown[]): void {
+    if (currentLogLevel >= LogLevel.INFO) {
+      console.log(`[${this.context}]`, ...args);
+    }
+  }
+
+  /** Log warning (warn and above) */
+  warn(...args: unknown[]): void {
+    if (currentLogLevel >= LogLevel.WARN) {
+      console.warn(`[${this.context}]`, ...args);
+    }
+  }
+
+  /** Log error (always logged) */
+  error(...args: unknown[]): void {
+    console.error(`[${this.context}]`, ...args);
+  }
+}
+
+/**
+ * Create a logger instance for a context
+ * @param context - Logging context (e.g., "Worker", "Indexer")
+ * @returns Logger instance
+ */
+export function createLogger(context: string): Logger {
+  return new Logger(context);
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -326,22 +403,78 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 // ============================================================================
 
 /**
- * Standard CORS headers for Workers
+ * Default allowed origins for CORS
+ * - localhost for development
+ * - null for file:// protocol
  */
-export const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-} as const;
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:*',
+  'http://127.0.0.1:*',
+  'http://[::1]:*',
+  'file://',
+  'null',
+];
+
+/**
+ * Generate CORS headers with origin validation
+ * @param origin - Request origin header
+ * @param allowedOrigins - Optional list of allowed origins (supports wildcards)
+ * @returns Headers object with CORS if origin is valid
+ */
+export function getCorsHeaders(
+  origin: string | null,
+  allowedOrigins: string[] = DEFAULT_ALLOWED_ORIGINS
+): Record<string, string> {
+  // If no origin (same-origin request) or non-browser request, return basic CORS
+  if (!origin) {
+    return {
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    };
+  }
+
+  // Check if origin matches any allowed pattern
+  const isAllowed = allowedOrigins.some(allowed => {
+    if (allowed.endsWith('*')) {
+      const prefix = allowed.slice(0, -1);
+      return origin.startsWith(prefix);
+    }
+    return origin === allowed;
+  });
+
+  // Only return CORS headers for allowed origins
+  if (isAllowed) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Vary": "Origin",
+    };
+  }
+
+  // Origin not allowed - return minimal headers
+  return {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
 
 /**
  * Create a JSON response with CORS headers
  * @param data - Response data
  * @param status - HTTP status code
+ * @param origin - Request origin for CORS validation
+ * @param allowedOrigins - Optional allowed origins list
  * @returns Response object
  */
-export function jsonResponse(data: unknown, status: number = 200): Response {
-  const headers = new Headers(CORS_HEADERS);
+export function jsonResponse(
+  data: unknown,
+  status: number = 200,
+  origin?: string | null,
+  allowedOrigins?: string[]
+): Response {
+  const corsHeaders = getCorsHeaders(origin || null, allowedOrigins);
+  const headers = new Headers(corsHeaders);
   headers.set("Content-Type", "application/json");
 
   if (status >= 400) {
@@ -358,9 +491,16 @@ export function jsonResponse(data: unknown, status: number = 200): Response {
  * Create an error response
  * @param error - Error message or Error object
  * @param status - HTTP status code
+ * @param origin - Request origin for CORS validation
+ * @param allowedOrigins - Optional allowed origins list
  * @returns Response object
  */
-export function errorResponse(error: Error | string, status: number = 500): Response {
+export function errorResponse(
+  error: Error | string,
+  status: number = 500,
+  origin?: string | null,
+  allowedOrigins?: string[]
+): Response {
   const message = error instanceof Error ? error.message : error;
-  return jsonResponse(message, status);
+  return jsonResponse(message, status, origin, allowedOrigins);
 }

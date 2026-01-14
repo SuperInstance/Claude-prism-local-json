@@ -28,11 +28,16 @@ import {
   errorResponse,
   jsonResponse,
   sanitizeQuery,
+  getCorsHeaders,
+  createLogger,
+  setLogLevelFromEnv,
   type Chunk,
   validateContent,
   validatePath,
-  CORS_HEADERS,
 } from "./shared/utils.js";
+
+// Initialize logger
+const logger = createLogger('PRISM-Worker');
 
 // ============================================================================
 // Type Definitions
@@ -152,25 +157,35 @@ class WorkerRouter {
     const url = new URL(request.url);
     const method = request.method;
     const path = url.pathname;
+    const origin = request.headers.get('Origin');
+
+    // Handle OPTIONS preflight request
+    if (method === 'OPTIONS') {
+      const corsHeaders = getCorsHeaders(origin);
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }
 
     const methodRoutes = this.routes.get(method);
     if (!methodRoutes) {
-      return this.notFound();
+      return this.notFound(origin);
     }
 
     const handler = methodRoutes.get(path);
     if (handler) {
-      return handler(request, { env, request });
+      return handler(request, { env, request, origin });
     }
 
     // Try pattern matching
     for (const [routePath, routeHandler] of methodRoutes.entries()) {
       if (this.matchRoute(routePath, path)) {
-        return routeHandler(request, { env, request });
+        return routeHandler(request, { env, request, origin });
       }
     }
 
-    return this.notFound();
+    return this.notFound(origin);
   }
 
   private matchRoute(routePath: string, requestPath: string): boolean {
@@ -181,14 +196,15 @@ class WorkerRouter {
     return regex.test(requestPath);
   }
 
-  private notFound(): Response {
+  private notFound(origin: string | null): Response {
+    const corsHeaders = getCorsHeaders(origin);
     return Response.json(
       {
         success: false,
         error: "Not Found",
         message: "The requested endpoint does not exist"
       },
-      { status: 404 }
+      { status: 404, headers: corsHeaders }
     );
   }
 }
@@ -269,7 +285,7 @@ function applyFilters(filters: SearchFilters, chunkRow: Record<string, unknown>)
  */
 async function healthCheck(
   request: Request,
-  ctx: { env: Env; request: Request }
+  ctx: { env: Env; request: Request; origin?: string | null }
 ): Promise<Response> {
   try {
     // Check D1
@@ -280,26 +296,20 @@ async function healthCheck(
     // Check Vectorize
     const vectorizeInfo = await ctx.env.VECTORIZE.describe();
 
-    return Response.json({
-      success: true,
-      data: {
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-        version: "0.3.1",
-        environment: ctx.env.ENVIRONMENT || "development",
-        vectorize: {
-          dimensions: vectorizeInfo.dimensions,
-          metric: vectorizeInfo.metric,
-          count: vectorizeInfo.count
-        },
-        d1_initialized: dbResult && dbResult.count > 0
-      }
-    });
+    return jsonResponse({
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      version: "0.3.1",
+      environment: ctx.env.ENVIRONMENT || "development",
+      vectorize: {
+        dimensions: vectorizeInfo.dimensions,
+        metric: vectorizeInfo.metric,
+        count: vectorizeInfo.count
+      },
+      d1_initialized: dbResult && dbResult.count > 0
+    }, 200, ctx.origin);
   } catch (error) {
-    return Response.json({
-      success: false,
-      error: error instanceof Error ? error.message : "Health check failed"
-    }, { status: 500 });
+    return errorResponse(error, 500, ctx.origin);
   }
 }
 
@@ -308,25 +318,23 @@ async function healthCheck(
  */
 async function indexCode(
   request: Request,
-  ctx: { env: Env; request: Request }
+  ctx: { env: Env; request: Request; origin?: string | null }
 ): Promise<Response> {
   try {
     const body = await request.json() as IndexRequest;
 
     // Validate request
     if (!body.files && !body.path) {
-      return Response.json({
-        success: false,
-        error: "Missing required field: files or path"
-      }, { status: 400 });
+      return errorResponse("Missing required field: files or path", 400, ctx.origin);
     }
 
     if (body.path && !body.files) {
-      return Response.json({
-        success: false,
-        error: "Direct filesystem access not available in Workers",
-        message: 'Use { "files": [{"path": "...", "content": "..."}] }'
-      }, { status: 400 });
+      return errorResponse(
+        "Direct filesystem access not available in Workers. " +
+        'Use { "files": [{"path": "...", "content": "..."}] }',
+        400,
+        ctx.origin
+      );
     }
 
     const files = body.files || [];
@@ -335,10 +343,11 @@ async function indexCode(
 
     // Validate file count
     if (files.length > CONFIG.MAX_FILES_PER_BATCH) {
-      return Response.json({
-        success: false,
-        error: `Too many files: ${files.length}. Maximum: ${CONFIG.MAX_FILES_PER_BATCH}`
-      }, { status: 400 });
+      return errorResponse(
+        `Too many files: ${files.length}. Maximum: ${CONFIG.MAX_FILES_PER_BATCH}`,
+        400,
+        ctx.origin
+      );
     }
 
     let indexedFiles = 0;
@@ -363,7 +372,7 @@ async function indexCode(
           if (existingRecord) {
             const checksum = await calculateChecksum(file.content);
             if (existingRecord.checksum === checksum) {
-              console.log(`Skipping unchanged file: ${file.path}`);
+              logger.debug(`Skipping unchanged file: ${file.path}`);
               continue;
             }
           }
@@ -445,7 +454,7 @@ async function indexCode(
       } catch (error) {
         errors++;
         failedFiles.push(file.path);
-        console.error(`Failed to index ${file.path}:`, error);
+        logger.error(`Failed to index ${file.path}:`, error);
       }
     }
 
@@ -453,31 +462,25 @@ async function indexCode(
     if (vectorsToUpsert.length > 0) {
       try {
         const upsertResult = await ctx.env.VECTORIZE.upsert(vectorsToUpsert);
-        console.log(`Vectorize upsert: ${upsertResult.mutationId}, ${vectorsToUpsert.length} vectors`);
+        logger.debug(`Vectorize upsert: ${upsertResult.mutationId}, ${vectorsToUpsert.length} vectors`);
       } catch (error) {
-        console.error("Vectorize upsert failed:", error);
+        logger.error("Vectorize upsert failed:", error);
         // Data is safe in D1
       }
     }
 
     const duration = Date.now() - startTime;
 
-    return Response.json({
-      success: true,
-      data: {
-        files: indexedFiles,
-        chunks: indexedChunks,
-        errors,
-        duration,
-        failedFiles
-      } as IndexResult
-    });
+    return jsonResponse({
+      files: indexedFiles,
+      chunks: indexedChunks,
+      errors,
+      duration,
+      failedFiles
+    } as IndexResult, 200, ctx.origin);
 
   } catch (error) {
-    return Response.json({
-      success: false,
-      error: error instanceof Error ? error.message : "Indexing failed"
-    }, { status: 500 });
+    return errorResponse(error, 500, ctx.origin);
   }
 }
 
@@ -486,27 +489,21 @@ async function indexCode(
  */
 async function searchCode(
   request: Request,
-  ctx: { env: Env; request: Request }
+  ctx: { env: Env; request: Request; origin?: string | null }
 ): Promise<Response> {
   try {
     const body = await request.json() as SearchRequest;
 
     // Validate request
     if (!body.query) {
-      return Response.json({
-        success: false,
-        error: "Missing required field: query"
-      }, { status: 400 });
+      return errorResponse("Missing required field: query", 400, ctx.origin);
     }
 
     const query = sanitizeQuery(body.query);
 
     // Check if query is empty after sanitization
     if (query.length === 0) {
-      return Response.json({
-        success: false,
-        error: "Query cannot be empty"
-      }, { status: 400 });
+      return errorResponse("Query cannot be empty", 400, ctx.origin);
     }
     const limit = Math.max(
       1,
@@ -522,24 +519,18 @@ async function searchCode(
     if (filters.createdAfter !== undefined) {
       const timestamp = Number(filters.createdAfter);
       if (isNaN(timestamp) || timestamp < 0) {
-        return Response.json({
-          success: false,
-          error: "Invalid createdAfter value: must be a positive timestamp"
-        }, { status: 400 });
+        return errorResponse("Invalid createdAfter value: must be a positive timestamp", 400, ctx.origin);
       }
     }
 
     if (filters.createdBefore !== undefined) {
       const timestamp = Number(filters.createdBefore);
       if (isNaN(timestamp) || timestamp < 0) {
-        return Response.json({
-          success: false,
-          error: "Invalid createdBefore value: must be a positive timestamp"
-        }, { status: 400 });
+        return errorResponse("Invalid createdBefore value: must be a positive timestamp", 400, ctx.origin);
       }
     }
 
-    console.log(`Searching for: "${query}" with limit ${limit}`);
+    logger.debug(`Searching for: "${query}" with limit ${limit}`);
 
     // Generate query embedding
     const queryEmbedding = await generateEmbedding(ctx, query);
@@ -556,13 +547,14 @@ async function searchCode(
     try {
       const queryResult = await ctx.env.VECTORIZE.query(queryEmbedding, queryOptions) as VectorizeQueryResult;
       matches = queryResult.matches || [];
-      console.log(`Vectorize returned ${matches.length} matches`);
+      logger.debug(`Vectorize returned ${matches.length} matches`);
     } catch (error) {
-      console.error("Vectorize query failed:", error);
-      return Response.json({
-        success: false,
-        error: `Vector search failed: ${error instanceof Error ? error.message : String(error)}`
-      }, { status: 500 });
+      logger.error("Vectorize query failed:", error);
+      return errorResponse(
+        `Vector search failed: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+        ctx.origin
+      );
     }
 
     // Fetch full content and apply filters
@@ -592,7 +584,7 @@ async function searchCode(
         .first();
 
       if (!chunkRow) {
-        console.warn(`Chunk ${match.id} not found in D1`);
+        logger.warn(`Chunk ${match.id} not found in D1`);
         continue;
       }
 
@@ -613,22 +605,16 @@ async function searchCode(
       if (results.length >= limit) break;
     }
 
-    console.log(`Returning ${results.length} results after filtering`);
+    logger.debug(`Returning ${results.length} results after filtering`);
 
-    return Response.json({
-      success: true,
-      data: {
-        results,
-        query,
-        total: results.length
-      }
-    });
+    return jsonResponse({
+      results,
+      query,
+      total: results.length
+    }, 200, ctx.origin);
 
   } catch (error) {
-    return Response.json({
-      success: false,
-      error: error instanceof Error ? error.message : "Search failed"
-    }, { status: 500 });
+    return errorResponse(error, 500, ctx.origin);
   }
 }
 
@@ -637,7 +623,7 @@ async function searchCode(
  */
 async function getStats(
   request: Request,
-  ctx: { env: Env; request: Request }
+  ctx: { env: Env; request: Request; origin?: string | null }
 ): Promise<Response> {
   try {
     const [chunkCount, fileCount, vectorizeInfo] = await Promise.all([
@@ -646,25 +632,19 @@ async function getStats(
       ctx.env.VECTORIZE.describe()
     ]);
 
-    return Response.json({
-      success: true,
-      data: {
-        chunks: chunkCount?.count ?? 0,
-        files: fileCount?.count ?? 0,
-        vectorize: {
-          dimensions: vectorizeInfo.dimensions,
-          metric: vectorizeInfo.metric,
-          count: vectorizeInfo.count
-        },
-        indexedAt: new Date().toISOString()
-      }
-    });
+    return jsonResponse({
+      chunks: chunkCount?.count ?? 0,
+      files: fileCount?.count ?? 0,
+      vectorize: {
+        dimensions: vectorizeInfo.dimensions,
+        metric: vectorizeInfo.metric,
+        count: vectorizeInfo.count
+      },
+      indexedAt: new Date().toISOString()
+    }, 200, ctx.origin);
 
   } catch (error) {
-    return Response.json({
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to get stats"
-    }, { status: 500 });
+    return errorResponse(error, 500, ctx.origin);
   }
 }
 
@@ -685,37 +665,9 @@ router.get("/api/stats", getStats);
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    };
+    // Initialize log level from environment
+    setLogLevelFromEnv(env.LOG_LEVEL);
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
-
-    try {
-      const response = await router.handle(request, env);
-
-      const newHeaders = new Headers(response.headers);
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        newHeaders.set(key, value);
-      });
-
-      return new Response(response.body, {
-        status: response.status,
-        headers: newHeaders
-      });
-
-    } catch (error) {
-      return Response.json({
-        success: false,
-        error: error instanceof Error ? error.message : "Internal server error"
-      }, {
-        status: 500,
-        headers: corsHeaders
-      });
-    }
+    return router.handle(request, env);
   }
 };
