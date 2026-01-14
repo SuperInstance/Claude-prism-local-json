@@ -691,12 +691,44 @@ async function searchCode(
     }
 
     const query = sanitizeQuery(body.query);
-    const limit = Math.min(
-      body.limit || CONFIG.DEFAULT_SEARCH_LIMIT,
-      CONFIG.MAX_SEARCH_LIMIT
+
+    // Check if query is empty after sanitization
+    if (query.length === 0) {
+      return Response.json({
+        success: false,
+        error: "Query cannot be empty"
+      }, { status: 400 });
+    }
+    const limit = Math.max(
+      1,
+      Math.min(
+        body.limit || CONFIG.DEFAULT_SEARCH_LIMIT,
+        CONFIG.MAX_SEARCH_LIMIT
+      )
     );
     const minScore = Math.max(0, Math.min(1, body.minScore ?? 0));
     const filters = body.filters || {};
+
+    // Validate date filters if provided
+    if (filters.createdAfter !== undefined) {
+      const timestamp = Number(filters.createdAfter);
+      if (isNaN(timestamp) || timestamp < 0) {
+        return Response.json({
+          success: false,
+          error: "Invalid createdAfter value: must be a positive timestamp"
+        }, { status: 400 });
+      }
+    }
+
+    if (filters.createdBefore !== undefined) {
+      const timestamp = Number(filters.createdBefore);
+      if (isNaN(timestamp) || timestamp < 0) {
+        return Response.json({
+          success: false,
+          error: "Invalid createdBefore value: must be a positive timestamp"
+        }, { status: 400 });
+      }
+    }
 
     console.log(`Searching for: "${query}" with limit ${limit}`);
 
