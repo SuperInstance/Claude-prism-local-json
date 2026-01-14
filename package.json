@@ -4,7 +4,15 @@
   "description": "A Cloudflare Worker-powered AI companion for Claude Code, built entirely on the free tier",
   "type": "module",
   "main": "src/worker.ts",
+  "bin": {
+    "prism": "./prism-cli.js"
+  },
   "scripts": {
+    "prism": "node prism-cli.js",
+    "prism:index": "node prism-cli.js index",
+    "prism:search": "node prism-cli.js search",
+    "prism:stats": "node prism-cli.js stats",
+    "prism:health": "node prism-cli.js health",
     "dev": "wrangler dev",
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -44,19 +52,19 @@
   "license": "MIT",
   "dependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
-    "itty-router": "^5.0.0",
-    "hnswlib-node": "^1.4.2"
+    "hnswlib-node": "^1.4.2",
+    "itty-router": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
     "@typescript-eslint/parser": "^8.19.1",
-    "@vitest/coverage-v8": "^2.1.8",
+    "@vitest/coverage-v8": "^4.0.17",
     "eslint": "^9.18.0",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8",
-    "wrangler": "^3.101.0"
+    "vitest": "^4.0.17",
+    "wrangler": "^4.59.1"
   },
   "engines": {
     "node": ">=18.0.0"
