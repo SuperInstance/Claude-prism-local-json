@@ -10,7 +10,24 @@
  * - <10ms search time even for 100K+ chunks
  * - Metadata filtering support
  * - Automatic scaling
+ *
+ * @version 0.3.1
  */
+
+// ============================================
+// Constants
+// ============================================
+
+const CONFIG = {
+  MAX_CHUNKS_PER_FILE: 1000,
+  MAX_LINES_PER_CHUNK: 50,
+  MIN_CHUNK_CONTENT_LENGTH: 1,
+  MAX_SEARCH_LIMIT: 100,
+  DEFAULT_SEARCH_LIMIT: 10,
+  MAX_FILES_PER_BATCH: 100,
+  MAX_EMBEDDING_CONCURRENCY: 10,
+  EMBEDDING_DIMENSIONS: 384,
+} as const;
 
 // ============================================
 // Type Definitions
@@ -34,6 +51,22 @@ interface VectorizeMatch {
   score: number;
   vector?: number[];
   metadata?: Record<string, string | number>;
+}
+
+interface VectorizeFilter {
+  [key: string]: string | number | boolean;
+}
+
+interface VectorizeQueryResult {
+  matches: VectorizeMatch[];
+  count?: number;
+}
+
+interface Chunk {
+  content: string;
+  startLine: number;
+  endLine: number;
+  language: string;
 }
 
 interface IndexRequest {
@@ -61,38 +94,56 @@ interface SearchRequest {
   };
 }
 
+interface IndexResult {
+  files: number;
+  chunks: number;
+  errors: number;
+  duration: number;
+  failedFiles: string[];
+}
+
+interface SearchFilters {
+  language?: string;
+  pathPrefix?: string;
+  filePath?: string;
+  createdAfter?: number;
+  createdBefore?: number;
+}
+
 interface Env {
-  // Vectorize index for vector search
+  /** Vectorize index for vector search */
   VECTORIZE: VectorizeIndex;
-
-  // D1 database for metadata
+  /** D1 database for metadata */
   DB: D1Database;
-
-  // Workers AI for embeddings
+  /** Workers AI for embeddings */
   AI: Ai;
-
-  // Environment variables
+  /** Environment name */
   ENVIRONMENT: string;
+  /** Logging level */
   LOG_LEVEL: string;
+  /** Embedding model to use */
   EMBEDDING_MODEL: string;
 }
+
+// Type for router handler functions
+type RouteHandler = (request: Request, ctx: { env: Env; request: Request }) => Promise<Response>;
 
 // ============================================
 // Simple Router
 // ============================================
 
 class WorkerRouter {
-  routes = new Map<string, Map<string, Function>>();
+  private routes = new Map<string, Map<string, RouteHandler>>();
 
-  get(path: string, handler: Function) {
+  get(path: string, handler: RouteHandler): void {
     this.addRoute("GET", path, handler);
   }
 
-  post(path: string, handler: Function) {
+  post(path: string, handler: RouteHandler): void {
     this.addRoute("POST", path, handler);
   }
 
-  addRoute(method: string, path: string, handler: Function) {
+  private addRoute(method: string, path: string, handler: RouteHandler): void {
     if (!this.routes.has(method)) {
       this.routes.set(method, new Map());
     }
@@ -109,7 +160,7 @@ class WorkerRouter {
       return this.notFound();
     }
 
-    let handler = methodRoutes.get(path);
+    const handler = methodRoutes.get(path);
     if (handler) {
       return handler(request, { env, request });
     }
@@ -124,13 +175,15 @@ class WorkerRouter {
     return this.notFound();
   }
 
-  matchRoute(routePath: string, requestPath: string): boolean {
-    const pattern = routePath.replace(/:[^/]+/g, "([^/]+)").replace(/\*/g, ".*");
+  private matchRoute(routePath: string, requestPath: string): boolean {
+    const pattern = routePath
+      .replace(/:[^/]+/g, "([^/]+)")
+      .replace(/\*/g, ".*");
     const regex = new RegExp(`^${pattern}$`);
     return regex.test(requestPath);
   }
 
-  notFound(): Response {
+  private notFound(): Response {
     return Response.json(
       {
         success: false,
@@ -146,6 +199,11 @@ class WorkerRouter {
 // Utility Functions
 // ============================================
 
+/**
+ * Calculate SHA-256 checksum of content
+ * @param content - Text content to hash
+ * @returns Hex-encoded SHA-256 hash
+ */
 async function calculateChecksum(content: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(content);
@@ -154,45 +212,69 @@ async function calculateChecksum(content: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Detect programming language from file path
+ * @param path - File path
+ * @returns Detected language or "text"
+ */
 function detectLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase();
   const languageMap: Record<string, string> = {
-    "ts": "typescript",
-    "js": "javascript",
-    "tsx": "typescript",
-    "jsx": "javascript",
-    "py": "python",
-    "rs": "rust",
-    "go": "go",
-    "java": "java",
-    "cpp": "cpp",
-    "c": "c",
-    "h": "c",
-    "cs": "csharp",
-    "php": "php",
-    "rb": "ruby",
-    "kt": "kotlin",
-    "swift": "swift",
-    "sh": "shell",
-    "yaml": "yaml",
-    "yml": "yaml",
-    "json": "json",
-    "md": "markdown"
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    cpp: "cpp",
+    cc: "cpp",
+    cxx: "cpp",
+    c: "c",
+    h: "c",
+    cs: "csharp",
+    php: "php",
+    rb: "ruby",
+    kt: "kotlin",
+    swift: "swift",
+    sh: "shell",
+    bash: "shell",
+    zsh: "shell",
+    yaml: "yaml",
+    yml: "yaml",
+    json: "json",
+    md: "markdown",
+    toml: "toml",
+    xml: "xml",
+    html: "html",
+    css: "css",
+    scss: "scss",
+    sql: "sql",
   };
   return languageMap[ext || ""] || "text";
 }
 
-function chunkFile(filePath: string, content: string, language: string) {
+/**
+ * Split file content into chunks
+ * @param filePath - File path for error reporting
+ * @param content - File content
+ * @param language - Detected language
+ * @returns Array of chunks
+ * @throws Error if content is too large
+ */
+function chunkFile(filePath: string, content: string, language: string): Chunk[] {
   const lines = content.split("\n");
-  const chunks = [];
-  const maxLinesPerChunk = 50;
+  const chunks: Chunk[] = [];
+  const maxLinesPerChunk = CONFIG.MAX_LINES_PER_CHUNK;
   let startLine = 0;
 
   while (startLine < lines.length) {
     const endLine = Math.min(startLine + maxLinesPerChunk, lines.length);
     const chunkContent = lines.slice(startLine, endLine).join("\n");
 
-    if (chunkContent.trim().length > 0) {
+    // Only include non-empty chunks
+    if (chunkContent.trim().length >= CONFIG.MIN_CHUNK_CONTENT_LENGTH) {
       chunks.push({
         content: chunkContent,
         startLine: startLine + 1, // 1-indexed
@@ -204,34 +286,71 @@ function chunkFile(filePath: string, content: string, language: string) {
     startLine = endLine;
   }
 
+  // Validate chunk count
+  if (chunks.length > CONFIG.MAX_CHUNKS_PER_FILE) {
+    throw new Error(
+      `File ${filePath} has too many chunks (${chunks.length}). ` +
+      `Maximum allowed: ${CONFIG.MAX_CHUNKS_PER_FILE}`
+    );
+  }
+
   return chunks;
 }
 
-async function generateEmbedding(ctx: { env: Env }, text: string): Promise<number[]> {
+/**
+ * Generate embedding for text using Workers AI
+ * @param ctx - Context with env binding
+ * @param text - Text to embed
+ * @returns Embedding vector
+ * @throws Error if embedding generation fails
+ */
+async function generateEmbedding(
+  ctx: { env: Env },
+  text: string
+): Promise<number[]> {
   try {
     const model = ctx.env.EMBEDDING_MODEL || "@cf/baai/bge-small-en-v1.5";
     const response = await ctx.env.AI.run(model, {
       text: [text]
-    }) as { data?: number[][] };
+    }) as { data?: number[][]; shape?: number[] };
 
-    if (!response || !response.data || !response.data[0] || response.data[0].length === 0) {
-      throw new Error("Invalid embedding response");
+    if (!response?.data?.[0]?.length) {
+      throw new Error("Invalid embedding response from Workers AI");
     }
 
-    return response.data[0];
+    const embedding = response.data[0];
+    if (embedding.length !== CONFIG.EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Invalid embedding dimensions: expected ${CONFIG.EMBEDDING_DIMENSIONS}, ` +
+        `got ${embedding.length}`
+      );
+    }
+
+    return embedding;
   } catch (error) {
-    console.error("Failed to generate embedding:", error);
-    throw new Error(`Embedding generation failed: ${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Embedding generation failed: ${message}`);
   }
 }
 
+/**
+ * Encode float array to Uint8Array for D1 BLOB storage
+ * @param array - Float array to encode
+ * @returns Uint8Array representation
+ */
 function encodeFloat32Array(array: number[]): Uint8Array {
   const float32Array = new Float32Array(array);
   return new Uint8Array(float32Array.buffer);
 }
 
-function decodeFloat32Array(blob: Uint8Array | any): number[] {
+/**
+ * Decode D1 BLOB to float array
+ * @param blob - Blob from D1 (various formats)
+ * @returns Float array
+ */
+function decodeFloat32Array(blob: Uint8Array | ArrayLike<number> | Record<string, unknown>): number[] {
   let bytes: Uint8Array;
+
   if (blob instanceof Uint8Array) {
     bytes = blob;
   } else if (Array.isArray(blob)) {
@@ -240,24 +359,114 @@ function decodeFloat32Array(blob: Uint8Array | any): number[] {
     if (blob.buffer instanceof ArrayBuffer) {
       bytes = new Uint8Array(blob.buffer);
     } else {
-      bytes = new Uint8Array(Object.values(blob));
+      // Handle D1 object format
+      bytes = new Uint8Array(Object.values(blob).filter((v): v is number => typeof v === 'number'));
     }
   } else {
-    console.error("Unexpected blob type:", typeof blob, blob);
-    return [];
+    throw new Error(`Invalid blob type: ${typeof blob}`);
   }
+
+  if (bytes.length % 4 !== 0) {
+    throw new Error(`Invalid blob length for float32: ${bytes.length} (must be multiple of 4)`);
+  }
+
   const float32Array = new Float32Array(bytes.buffer);
   return Array.from(float32Array);
+}
+
+/**
+ * Validate file path to prevent path traversal attacks
+ * @param path - File path to validate
+ * @returns True if valid
+ * @throws Error if path contains suspicious patterns
+ */
+function validatePath(path: string): void {
+  // Check for path traversal attempts
+  if (path.includes('..') || path.includes('~')) {
+    throw new Error(`Invalid file path: ${path}`);
+  }
+
+  // Check for absolute paths (not allowed in Workers)
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) {
+    throw new Error(`Absolute paths not allowed: ${path}`);
+  }
+
+  // Check for null bytes
+  if (path.includes('\0')) {
+    throw new Error(`Null bytes not allowed in path`);
+  }
+}
+
+/**
+ * Validate file content
+ * @param path - File path for error reporting
+ * @param content - File content
+ * @throws Error if content is invalid
+ */
+function validateContent(path: string, content: string): void {
+  if (typeof content !== 'string') {
+    throw new Error(`Invalid content type for ${path}`);
+  }
+
+  if (content.length === 0) {
+    throw new Error(`Empty file content: ${path}`);
+  }
+
+  if (content.length > 10_000_000) { // 10MB limit
+    throw new Error(`File too large: ${path} (${content.length} bytes)`);
+  }
+}
+
+/**
+ * Sanitize search query
+ * @param query - Search query
+ * @returns Sanitized query
+ */
+function sanitizeQuery(query: string): string {
+  return query.trim().slice(0, 1000); // Max 1000 chars
+}
+
+/**
+ * Apply additional filters to search results
+ * @param filters - Search filters
+ * @param chunkRow - Chunk data from D1
+ * @returns True if chunk passes all filters
+ */
+function applyFilters(filters: SearchFilters, chunkRow: Record<string, unknown>): boolean {
+  if (filters.language && chunkRow.language !== filters.language) {
+    return false;
+  }
+
+  if (filters.pathPrefix && !String(chunkRow.file_path).startsWith(filters.pathPrefix)) {
+    return false;
+  }
+
+  if (filters.filePath) {
+    const pattern = filters.filePath.replace('*', '');
+    if (!String(chunkRow.file_path).includes(pattern)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // ============================================
 // Endpoint Handlers
 // ============================================
 
-async function healthCheck(request: Request, ctx: { env: Env; request: Request }): Promise<Response> {
+/**
+ * Health check endpoint
+ */
+async function healthCheck(
+  request: Request,
+  ctx: { env: Env; request: Request }
+): Promise<Response> {
   try {
     // Check D1
-    const dbResult = await ctx.env.DB.prepare("SELECT COUNT(*) as count FROM hnsw_metadata").first();
+    const dbResult = await ctx.env.DB
+      .prepare("SELECT COUNT(*) as count FROM hnsw_metadata")
+      .first();
 
     // Check Vectorize
     const vectorizeInfo = await ctx.env.VECTORIZE.describe();
@@ -267,7 +476,7 @@ async function healthCheck(request: Request, ctx: { env: Env; request: Request }
       data: {
         status: "healthy",
         timestamp: new Date().toISOString(),
-        version: "0.3.0",
+        version: "0.3.1",
         environment: ctx.env.ENVIRONMENT || "development",
         vectorize: {
           dimensions: vectorizeInfo.dimensions,
@@ -285,10 +494,17 @@ async function healthCheck(request: Request, ctx: { env: Env; request: Request }
   }
 }
 
-async function indexCode(request: Request, ctx: { env: Env; request: Request }): Promise<Response> {
+/**
+ * Index code endpoint
+ */
+async function indexCode(
+  request: Request,
+  ctx: { env: Env; request: Request }
+): Promise<Response> {
   try {
     const body = await request.json() as IndexRequest;
 
+    // Validate request
     if (!body.files && !body.path) {
       return Response.json({
         success: false,
@@ -299,8 +515,8 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
     if (body.path && !body.files) {
       return Response.json({
         success: false,
-        error: "Direct filesystem access not available in Workers. Please provide files array.",
-        message: 'Use { "files": [{"path": "...", "content": "..."}] } instead of { "path": "..." }'
+        error: "Direct filesystem access not available in Workers",
+        message: 'Use { "files": [{"path": "...", "content": "..."}] }'
       }, { status: 400 });
     }
 
@@ -308,21 +524,32 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
     const options = body.options || {};
     const startTime = Date.now();
 
+    // Validate file count
+    if (files.length > CONFIG.MAX_FILES_PER_BATCH) {
+      return Response.json({
+        success: false,
+        error: `Too many files: ${files.length}. Maximum: ${CONFIG.MAX_FILES_PER_BATCH}`
+      }, { status: 400 });
+    }
+
     let indexedFiles = 0;
     let indexedChunks = 0;
     let errors = 0;
     const failedFiles: string[] = [];
-
-    // Batch vectors for Vectorize upsert
     const vectorsToUpsert: VectorizeVector[] = [];
 
     for (const file of files) {
       try {
-        // Check if file needs reindexing (incremental mode)
+        // Validate inputs
+        validatePath(file.path);
+        validateContent(file.path, file.content);
+
+        // Check incremental
         if (options.incremental) {
-          const existingRecord = await ctx.env.DB.prepare(
-            "SELECT checksum, last_modified FROM file_index WHERE path = ?"
-          ).bind(file.path).first();
+          const existingRecord = await ctx.env.DB
+            .prepare("SELECT checksum FROM file_index WHERE path = ?")
+            .bind(file.path)
+            .first();
 
           if (existingRecord) {
             const checksum = await calculateChecksum(file.content);
@@ -333,29 +560,31 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
           }
         }
 
-        // Chunk the file
-        const chunks = chunkFile(file.path, file.content, file.language || detectLanguage(file.path));
+        // Process file
+        const language = file.language || detectLanguage(file.path);
+        const chunks = chunkFile(file.path, file.content, language);
 
-        // Generate embeddings for all chunks
+        // Generate embeddings with concurrency limit
         const embeddings: number[][] = [];
-        for (const chunk of chunks) {
-          try {
-            const embedding = await generateEmbedding(ctx, chunk.content);
-            embeddings.push(embedding);
-          } catch (error) {
-            console.error(`Failed to generate embedding for ${file.path}:${chunk.startLine}:`, error);
-            throw error;
-          }
+        for (let i = 0; i < chunks.length; i += CONFIG.MAX_EMBEDDING_CONCURRENCY) {
+          const batch = chunks.slice(i, i + CONFIG.MAX_EMBEDDING_CONCURRENCY);
+          const batchEmbeddings = await Promise.all(
+            batch.map(chunk => generateEmbedding(ctx, chunk.content))
+          );
+          embeddings.push(...batchEmbeddings);
         }
 
-        // Prepare vectors for Vectorize
+        // Calculate file checksum once
+        const fileChecksum = await calculateChecksum(file.content);
+
+        // Prepare vectors and D1 inserts
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
           const embedding = embeddings[i];
           const chunkId = `${file.path}:${i}`;
           const checksum = await calculateChecksum(chunk.content);
 
-          // Add to batch for Vectorize
+          // Add to Vectorize batch
           vectorsToUpsert.push({
             id: chunkId,
             values: embedding,
@@ -368,7 +597,7 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
             }
           });
 
-          // Store full content and embedding in D1 (fallback and compatibility)
+          // Store in D1
           await ctx.env.DB.prepare(`
             INSERT OR REPLACE INTO vector_chunks
             (id, file_path, content, start_line, end_line, language, embedding, checksum, created_at, updated_at)
@@ -388,7 +617,6 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
         }
 
         // Update file index
-        const fileChecksum = await calculateChecksum(file.content);
         await ctx.env.DB.prepare(`
           INSERT OR REPLACE INTO file_index
           (path, checksum, file_size, last_modified, last_indexed, chunk_count)
@@ -412,14 +640,14 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
       }
     }
 
-    // Batch upsert to Vectorize (async operation)
+    // Batch upsert to Vectorize
     if (vectorsToUpsert.length > 0) {
       try {
         const upsertResult = await ctx.env.VECTORIZE.upsert(vectorsToUpsert);
         console.log(`Vectorize upsert: ${upsertResult.mutationId}, ${vectorsToUpsert.length} vectors`);
       } catch (error) {
         console.error("Vectorize upsert failed:", error);
-        // Continue anyway - data is in D1
+        // Data is safe in D1
       }
     }
 
@@ -433,7 +661,7 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
         errors,
         duration,
         failedFiles
-      }
+      } as IndexResult
     });
 
   } catch (error) {
@@ -444,10 +672,17 @@ async function indexCode(request: Request, ctx: { env: Env; request: Request }):
   }
 }
 
-async function searchCode(request: Request, ctx: { env: Env; request: Request }): Promise<Response> {
+/**
+ * Search code endpoint
+ */
+async function searchCode(
+  request: Request,
+  ctx: { env: Env; request: Request }
+): Promise<Response> {
   try {
     const body = await request.json() as SearchRequest;
 
+    // Validate request
     if (!body.query) {
       return Response.json({
         success: false,
@@ -455,40 +690,31 @@ async function searchCode(request: Request, ctx: { env: Env; request: Request })
       }, { status: 400 });
     }
 
-    const limit = Math.min(body.limit || 10, 100); // Vectorize max is 100
-    const minScore = body.minScore || 0;
+    const query = sanitizeQuery(body.query);
+    const limit = Math.min(
+      body.limit || CONFIG.DEFAULT_SEARCH_LIMIT,
+      CONFIG.MAX_SEARCH_LIMIT
+    );
+    const minScore = Math.max(0, Math.min(1, body.minScore ?? 0));
     const filters = body.filters || {};
 
-    console.log(`Searching for: "${body.query}" with limit ${limit}`);
+    console.log(`Searching for: "${query}" with limit ${limit}`);
 
     // Generate query embedding
-    const queryEmbedding = await generateEmbedding(ctx, body.query);
-    console.log(`Query embedding dimension: ${queryEmbedding.length}`);
+    const queryEmbedding = await generateEmbedding(ctx, query);
 
-    // Build Vectorize query options
-    const queryOptions: {
-      topK: number;
-      returnValues: boolean;
-      returnMetadata: "none" | "indexed" | "all";
-      namespace?: string;
-      filter?: VectorizeFilter;
-    } = {
-      topK: limit * 2, // Get more results to account for filtering
+    // Build query options
+    const queryOptions = {
+      topK: limit * 2, // Get extra for post-filtering
       returnValues: false,
-      returnMetadata: "all"
+      returnMetadata: "all" as const,
     };
-
-    // Add namespace filter if provided (for multi-tenancy)
-    if (filters.pathPrefix) {
-      queryOptions.namespace = filters.pathPrefix.replace(/^\/+/, "").replace(/\/+$/, "");
-    }
 
     // Execute vector search
     let matches: VectorizeMatch[];
     try {
-      const queryResult = await ctx.env.VECTORIZE.query(queryEmbedding, queryOptions);
-      // Vectorize returns { matches: [...] }
-      matches = (queryResult as any).matches || queryResult as any;
+      const queryResult = await ctx.env.VECTORIZE.query(queryEmbedding, queryOptions) as VectorizeQueryResult;
+      matches = queryResult.matches || [];
       console.log(`Vectorize returned ${matches.length} matches`);
     } catch (error) {
       console.error("Vectorize query failed:", error);
@@ -498,44 +724,51 @@ async function searchCode(request: Request, ctx: { env: Env; request: Request })
       }, { status: 500 });
     }
 
-    // Fetch full content from D1 and apply additional filters
-    const results = [];
+    // Fetch full content and apply filters
+    const results: Array<{
+      id: string;
+      filePath: string;
+      content: string;
+      startLine: number;
+      endLine: number;
+      language: string;
+      score: number;
+    }> = [];
     const processedIds = new Set<string>();
 
     for (const match of matches) {
-      // Skip if score is below threshold
+      // Skip low scores
       if (match.score < minScore) continue;
 
       // Skip duplicates
       if (processedIds.has(match.id)) continue;
       processedIds.add(match.id);
 
-      // Fetch full content from D1
-      const chunkRow = await ctx.env.DB.prepare(
-        "SELECT id, file_path, content, start_line, end_line, language FROM vector_chunks WHERE id = ?"
-      ).bind(match.id).first();
+      // Fetch from D1
+      const chunkRow = await ctx.env.DB
+        .prepare("SELECT id, file_path, content, start_line, end_line, language FROM vector_chunks WHERE id = ?")
+        .bind(match.id)
+        .first();
 
       if (!chunkRow) {
         console.warn(`Chunk ${match.id} not found in D1`);
         continue;
       }
 
-      // Apply additional filters
-      if (filters.language && chunkRow.language !== filters.language) continue;
-      if (filters.filePath && !chunkRow.file_path.includes(filters.filePath.replace("*", ""))) continue;
-      if (filters.pathPrefix && !chunkRow.file_path.startsWith(filters.pathPrefix)) continue;
+      // Apply filters
+      if (!applyFilters(filters, chunkRow)) continue;
 
       results.push({
-        id: chunkRow.id,
-        filePath: chunkRow.file_path,
-        content: chunkRow.content,
-        startLine: chunkRow.start_line,
-        endLine: chunkRow.end_line,
-        language: chunkRow.language,
+        id: String(chunkRow.id),
+        filePath: String(chunkRow.file_path),
+        content: String(chunkRow.content),
+        startLine: Number(chunkRow.start_line),
+        endLine: Number(chunkRow.end_line),
+        language: String(chunkRow.language),
         score: match.score
       });
 
-      // Stop if we have enough results
+      // Stop if we have enough
       if (results.length >= limit) break;
     }
 
@@ -545,7 +778,7 @@ async function searchCode(request: Request, ctx: { env: Env; request: Request })
       success: true,
       data: {
         results,
-        query: body.query,
+        query,
         total: results.length
       }
     });
@@ -558,25 +791,25 @@ async function searchCode(request: Request, ctx: { env: Env; request: Request })
   }
 }
 
-async function getStats(request: Request, ctx: { env: Env; request: Request }): Promise<Response> {
+/**
+ * Get index statistics
+ */
+async function getStats(
+  request: Request,
+  ctx: { env: Env; request: Request }
+): Promise<Response> {
   try {
-    // Get D1 stats
-    const chunkCount = await ctx.env.DB.prepare(
-      "SELECT COUNT(*) as count FROM vector_chunks WHERE deleted_at IS NULL"
-    ).first();
-
-    const fileCount = await ctx.env.DB.prepare(
-      "SELECT COUNT(*) as count FROM file_index"
-    ).first();
-
-    // Get Vectorize stats
-    const vectorizeInfo = await ctx.env.VECTORIZE.describe();
+    const [chunkCount, fileCount, vectorizeInfo] = await Promise.all([
+      ctx.env.DB.prepare("SELECT COUNT(*) as count FROM vector_chunks WHERE deleted_at IS NULL").first(),
+      ctx.env.DB.prepare("SELECT COUNT(*) as count FROM file_index").first(),
+      ctx.env.VECTORIZE.describe()
+    ]);
 
     return Response.json({
       success: true,
       data: {
-        chunks: chunkCount?.count || 0,
-        files: fileCount?.count || 0,
+        chunks: chunkCount?.count ?? 0,
+        files: fileCount?.count ?? 0,
         vectorize: {
           dimensions: vectorizeInfo.dimensions,
           metric: vectorizeInfo.metric,
@@ -600,10 +833,7 @@ async function getStats(request: Request, ctx: { env: Env; request: Request }): 
 
 const router = new WorkerRouter();
 
-// Health check
 router.get("/health", healthCheck);
-
-// API endpoints
 router.post("/api/index", indexCode);
 router.post("/api/search", searchCode);
 router.get("/api/stats", getStats);
