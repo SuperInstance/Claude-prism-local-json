@@ -39,6 +39,8 @@ database_id = "08674847-b36d-442e-b6a4-46b359cc6cf3"
 [[kv_namespaces]]
 binding = "KV"
 id = "57bcad6995384ed69576754748d380f8"
+# Use the same namespace for dev (can create separate preview namespace later)
+# preview_id = "YOUR_PREVIEW_ID_HERE"
 
 # ============================================
 # R2 Bucket Bindings
@@ -56,6 +58,8 @@ bucket_name = "claudes-friend-storage"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "claudes-friend-index"
+# Vectorize doesn't support local mode, use remote in dev
+remote = true
 
 # ============================================
 # Durable Objects Bindings
@@ -76,6 +80,8 @@ index_name = "claudes-friend-index"
 
 [ai]
 binding = "AI"
+# AI bindings don't support local mode, use remote in dev
+remote = true
 
 # ============================================
 # Environment Variables
