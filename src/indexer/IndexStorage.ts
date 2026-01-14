@@ -23,55 +23,38 @@
  *    - Exports/import functionality for backup and migration
  *    - Validation methods for index integrity checking
  *
- * CURRENT IMPLEMENTATION (IN-MEMORY):
- * - Uses in-memory Map storage
- * - Data is lost when process exits
- * - Suitable for development and testing
+ * IMPLEMENTATION:
+ * - Uses SQLite-based persistent storage (SQLiteIndexStorage)
+ * - Data survives process restarts
+ * - SHA-256 checksums for accurate change detection
+ * - Supports incremental indexing with 10-100x speedup
  *
- * PRODUCTION MIGRATION PLAN:
- * - Cloudflare Workers KV: For metadata
- * - Cloudflare D1: For file modification records
- * - Schema:
- *   ```sql
- *   CREATE TABLE file_modifications (
- *     path TEXT PRIMARY KEY,
- *     last_modified INTEGER,
- *     file_size INTEGER,
- *     checksum TEXT,
- *     index_version TEXT
- *   );
- *
- *   CREATE TABLE index_metadata (
- *     index_id TEXT PRIMARY KEY,
- *     last_updated INTEGER,
- *     files_indexed INTEGER,
- *     chunks_indexed INTEGER,
- *     version TEXT
- *   );
- *   ```
+ * SCHEMA:
+ * - index_metadata: Global index statistics
+ * - indexed_files: File tracking with checksums
+ * - code_chunks: Chunk storage with metadata
+ * - schema_migrations: Migration tracking
  *
  * WHY TRACK FILE MODIFICATION TIMES:
  * - Incremental indexing: Only reprocess changed files
  * - Performance: 10-100x speedup for typical workflows
  * - Cost savings: Fewer embedding API calls
  *
- * LIMITATIONS:
- * - Mtime can be manually altered (git operations, file systems)
- * - No content hash verification yet (TODO: SHA-256)
- * - No cross-session persistence (TODO: KV/D1 integration)
+ * KEY FEATURES:
+ * - SHA-256 checksums for accurate change detection
+ * - Soft delete support for recovery
+ * - Migration system for schema versioning
+ * - Backup/restore functionality
+ * - Concurrent access support (WAL mode)
  *
- * FUTURE ENHANCEMENTS:
- * - Content-based hashing (SHA-256) for integrity
- * - Persistent storage (Cloudflare KV/D1)
- * - Index versioning for schema migrations
- * - Compaction and cleanup of stale records
- *
+ * @see SQLiteIndexStorage for implementation
  * @see IndexerOrchestrator.filterUnchangedFiles() for usage
  * @see docs/architecture/04-indexer-architecture.md for design
  */
 
 import type { PrismConfig } from '../config/types/index.js';
 import { createPrismError, ErrorCode } from '../core/types/index.js';
+import { SQLiteIndexStorage, type FileMetadata } from './SQLiteIndexStorage.js';
 
 /**
  * Index metadata
@@ -133,13 +116,16 @@ interface FileModificationRecord {
  * Index storage manager
  *
  * Handles persistence of index metadata and file modification tracking.
+ * Uses SQLite-based storage for data persistence across restarts.
  */
 export class IndexStorage {
   private config: PrismConfig;
   private metadata: IndexMetadata | null = null;
   private fileModifications: Map<string, Date> = new Map();
+  private sqliteStorage: SQLiteIndexStorage;
+  private initialized = false;
 
-  // In-memory storage (would be replaced with KV/D1 in production)
+  // In-memory cache (backed by SQLite)
   private storage: {
     metadata: IndexMetadata | null;
     fileModifications: FileModificationRecord[];
@@ -150,6 +136,19 @@ export class IndexStorage {
 
   constructor(config: PrismConfig) {
     this.config = config;
+    this.sqliteStorage = new SQLiteIndexStorage(config);
+  }
+
+  /**
+   * Initialize the storage
+   *
+   * Must be called before using storage operations.
+   */
+  async initialize(): Promise<void> {
+    if (!this.initialized) {
+      await this.sqliteStorage.initialize();
+      this.initialized = true;
+    }
   }
 
   /**
@@ -159,14 +158,10 @@ export class IndexStorage {
    *
    * Persists index metadata for incremental indexing support.
    *
-   * CURRENT BEHAVIOR:
-   * - Stores in memory only (lost on process exit)
-   * - No persistence to disk or cloud
-   *
-   * PRODUCTION BEHAVIOR (TODO):
-   * - Persist to Cloudflare KV or D1
-   * - Implement retry logic for network failures
-   * - Add transaction support for atomic updates
+   * BEHAVIOR:
+   * - Stores in SQLite database (survives process exit)
+   * - Updates both in-memory cache and persistent storage
+   * - Supports concurrent access via WAL mode
    *
    * @param metadata - IndexMetadata to persist
    * @throws {PrismError} If save operation fails
@@ -175,14 +170,20 @@ export class IndexStorage {
    */
   async saveIndex(metadata: IndexMetadata): Promise<void> {
     try {
+      // Initialize SQLite storage if needed
+      if (!this.initialized) {
+        await this.initialize();
+      }
+
+      // Save to persistent storage
+      await this.sqliteStorage.saveIndex(metadata);
+
+      // Update in-memory cache
       this.storage.metadata = {
         ...metadata,
         lastUpdated: new Date(metadata.lastUpdated),
       };
       this.metadata = this.storage.metadata;
-
-      // In production, this would persist to KV/D1
-      // await this.env.PRISM_INDEX_METADATA.put(metadata.indexId, JSON.stringify(metadata));
     } catch (error) {
       throw createPrismError(
         ErrorCode.INDEXING_FAILED,
@@ -198,16 +199,28 @@ export class IndexStorage {
    */
   async loadIndex(): Promise<IndexMetadata | null> {
     try {
+      // Initialize SQLite storage if needed
+      if (!this.initialized) {
+        await this.initialize();
+      }
+
+      // Try to load from persistent storage first
+      const loaded = await this.sqliteStorage.loadIndex();
+
+      if (loaded) {
+        // Update in-memory cache
+        this.storage.metadata = loaded;
+        this.metadata = loaded;
+        return loaded;
+      }
+
+      // Fall back to in-memory cache
       if (this.storage.metadata) {
         return {
           ...this.storage.metadata,
           lastUpdated: new Date(this.storage.metadata.lastUpdated),
         };
       }
-
-      // In production, this would load from KV/D1
-      // const data = await this.env.PRISM_INDEX_METADATA.get(indexId);
-      // return data ? JSON.parse(data) : null;
 
       return null;
     } catch (error) {
@@ -246,6 +259,18 @@ export class IndexStorage {
    */
   async getLastModified(filePath: string): Promise<Date | null> {
     try {
+      // Initialize SQLite storage if needed
+      if (!this.initialized) {
+        await this.initialize();
+      }
+
+      // Try SQLite storage first
+      const file = await this.sqliteStorage.getFile(filePath);
+      if (file) {
+        return new Date(file.lastModified);
+      }
+
+      // Fall back to in-memory cache
       const record = this.storage.fileModifications.find(
         (r) => r.path === filePath
       );
@@ -268,6 +293,21 @@ export class IndexStorage {
    */
   async setLastModified(filePath: string, date: Date): Promise<void> {
     try {
+      // Initialize SQLite storage if needed
+      if (!this.initialized) {
+        await this.initialize();
+      }
+
+      // Save to persistent storage
+      await this.sqliteStorage.saveFile(filePath, {
+        path: filePath,
+        checksum: '', // Will be updated by indexer
+        fileSize: 0,
+        lastModified: date.getTime(),
+        lastIndexed: Date.now(),
+      });
+
+      // Update in-memory cache
       const existingIndex = this.storage.fileModifications.findIndex(
         (r) => r.path === filePath
       );
@@ -299,9 +339,21 @@ export class IndexStorage {
    * @returns Map of file paths to modification dates
    */
   async getAllTrackedFiles(): Promise<Map<string, Date>> {
-    return new Map(
-      this.storage.fileModifications.map((r) => [r.path, new Date(r.lastModified)])
-    );
+    // Initialize SQLite storage if needed
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    // Get from persistent storage
+    const files = await this.sqliteStorage.getAllTrackedFiles();
+
+    // Convert to Map<Date> for backward compatibility
+    const result = new Map<string, Date>();
+    for (const [path, metadata] of files.entries()) {
+      result.set(path, new Date(metadata.lastModified));
+    }
+
+    return result;
   }
 
   /**
@@ -310,6 +362,15 @@ export class IndexStorage {
    * @param filePath - Path to file
    */
   async removeFile(filePath: string): Promise<void> {
+    // Initialize SQLite storage if needed
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    // Remove from persistent storage
+    await this.sqliteStorage.deleteFile(filePath);
+
+    // Remove from in-memory cache
     const index = this.storage.fileModifications.findIndex(
       (r) => r.path === filePath
     );
@@ -325,6 +386,19 @@ export class IndexStorage {
    * Clear all index metadata
    */
   async clearIndex(): Promise<void> {
+    // Initialize SQLite storage if needed
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    // Clear persistent storage
+    try {
+      await this.sqliteStorage.clearIndex();
+    } catch {
+      // Ignore errors if SQLite not available
+    }
+
+    // Clear in-memory cache
     this.storage.metadata = null;
     this.storage.fileModifications = [];
     this.fileModifications.clear();
@@ -495,5 +569,17 @@ export class IndexStorage {
    */
   getFileModifications(): FileModificationRecord[] {
     return [...this.storage.fileModifications];
+  }
+
+  /**
+   * Get the underlying SQLite storage instance
+   *
+   * Provides direct access to SQLite storage for advanced operations
+   * like chunk storage, backup/restore, etc.
+   *
+   * @returns SQLiteIndexStorage instance
+   */
+  getSQLiteStorage(): SQLiteIndexStorage {
+    return this.sqliteStorage;
   }
 }

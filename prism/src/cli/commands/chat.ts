@@ -86,10 +86,16 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import readline from 'readline';
-import { ModelRouter } from '../../model-router/index.js';
-import { loadConfig } from '../../config/loader.js';
+import { loadConfig, expandTilde } from '../../config/loader.js';
 import { createSpinner } from '../progress.js';
-import { handleCLIError } from '../errors.js';
+import { handleCLIError, createDBError } from '../errors.js';
+import type { SearchResult } from '../../core/types.js';
+import { SQLiteVectorDB } from '../../vector-db/SQLiteVectorDB.js';
+import { EmbeddingService } from '../../core/embeddings.js';
+import type { CodeChunk } from '../../core/types.js';
+import fs from 'fs-extra';
+import path from 'path';
+import os from 'os';
 
 // ============================================================================
 // TYPES
@@ -119,12 +125,16 @@ interface ChatOptions {
  * Maintains the state of an ongoing chat session including:
  * - messages: Conversation history (user + assistant messages)
  * - config: Loaded configuration
- * - modelRouter: Model selection and routing logic
+ * - vectorDB: Vector database for context retrieval
+ * - embeddingService: Embedding service for query generation
+ * - historyFile: Path to conversation history file
  */
 interface ChatSession {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   config: any;
-  modelRouter: ModelRouter | null;
+  vectorDB: SQLiteVectorDB | null;
+  embeddingService: EmbeddingService;
+  historyFile: string;
 }
 
 // ============================================================================
@@ -305,7 +315,9 @@ async function startChatSession(options: ChatOptions): Promise<void> {
   const session: ChatSession = {
     messages: [],
     config: null,
-    modelRouter: null,
+    vectorDB: null,
+    embeddingService: new EmbeddingService(),
+    historyFile: path.join(os.homedir(), '.prism', 'chat-history.json'),
   };
 
   // Load configuration
@@ -315,10 +327,32 @@ async function startChatSession(options: ChatOptions): Promise<void> {
   try {
     session.config = await loadConfig();
 
-    // Initialize model router
-    session.modelRouter = new ModelRouter(session.config.modelRouter);
+    // Load conversation history if requested
+    if (options.history && await fs.pathExists(session.historyFile)) {
+      const historyData = await fs.readJSON(session.historyFile);
+      session.messages = historyData.messages || [];
+      spinner.succeed(`Configuration loaded (${session.messages.length} messages from history)`);
+    } else {
+      spinner.succeed('Configuration loaded');
+    }
 
-    spinner.succeed('Chat session initialized');
+    // Initialize vector database
+    spinner.start('Loading vector database...');
+    const dbPath = expandTilde(session.config.vectorDB.path || '~/.prism/vector.db');
+
+    if (!(await fs.pathExists(dbPath))) {
+      spinner.warn('No index found - chat will work without code context');
+      console.log(chalk.yellow('\nTip: Run "prism index <path>" to enable code-aware responses\n'));
+    } else {
+      try {
+        session.vectorDB = new SQLiteVectorDB({ path: dbPath });
+        const stats = session.vectorDB.getStats();
+        spinner.succeed(`Vector database loaded (${stats.chunkCount} chunks)`);
+      } catch (error) {
+        spinner.warn('Failed to load vector database - chat will work without code context');
+        console.log(chalk.yellow(`\nError: ${error}\n`));
+      }
+    }
   } catch (error) {
     spinner.fail('Failed to initialize chat');
     throw error;
@@ -333,8 +367,6 @@ async function startChatSession(options: ChatOptions): Promise<void> {
   // ======================================================================
   // MAIN REPL LOOP
   // ======================================================================
-  // Continuously accept user input and generate responses until
-  // the user enters a quit command.
   while (true) {
     displayPrompt();
 
@@ -383,35 +415,40 @@ async function startChatSession(options: ChatOptions): Promise<void> {
     session.messages.push({ role: 'user', content: input });
 
     // ====================================================================
-    // STEP 2: Display thinking indicator
+    // STEP 2: Retrieve relevant context
     // ====================================================================
-    // Show animated indicator while waiting for response
     const typingInterval = displayTypingIndicator();
 
+    let context: CodeChunk[] = [];
+    let contextSummary = '';
+
+    if (session.vectorDB) {
+      try {
+        // Generate query embedding
+        const queryEmbedding = session.embeddingService.generateEmbedding(input);
+
+        // Search for relevant code chunks
+        const searchResults = await session.vectorDB.search(queryEmbedding, 5);
+
+        // Extract chunks from results
+        context = searchResults.map((r) => r.chunk);
+
+        if (context.length > 0) {
+          contextSummary = `\n\nRelevant code context:\n${context.map((c, i) =>
+            `${i + 1}. ${c.filePath}:${c.startLine}-${c.endLine} (${c.language})`
+          ).join('\n')}\n`;
+        }
+      } catch (error) {
+        // Continue without context if search fails
+        console.error(chalk.yellow(`\nWarning: Failed to retrieve context: ${error}\n`));
+      }
+    }
+
+    // ====================================================================
+    // STEP 3: Generate response
+    // ====================================================================
     try {
-      // ====================================================================
-      // STEP 3: Generate response
-      // ====================================================================
-      // TODO: Implement actual RAG workflow:
-      // 1. Search codebase for relevant context
-      // 2. Build prompt with context + question
-      // 3. Route to best available model
-      // 4. Generate response
-      // 5. Format and display
-
-      // const response = await session.modelRouter.chat(session.messages);
-
-      // AUDIT: Placeholder implementation only
-      // Real chat functionality is completely unimplemented
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const response = `I understand you're asking about: "${input}"\n\n` +
-        `This is a placeholder response. The actual chat functionality will be ` +
-        `implemented in a future version. It will:\n\n` +
-        `• Search your indexed codebase for relevant context\n` +
-        `• Use the best available model (Claude, Ollama, etc.)\n` +
-        `• Provide intelligent answers about your code\n` +
-        `• Remember conversation context\n`;
+      const response = await generateResponse(input, context, session.messages);
 
       // Clear typing indicator
       clearTypingIndicator(typingInterval);
@@ -423,6 +460,12 @@ async function startChatSession(options: ChatOptions): Promise<void> {
 
       // Add assistant message to history
       session.messages.push({ role: 'assistant', content: response });
+
+      // Save history if enabled
+      if (options.history) {
+        await fs.ensureDir(path.dirname(session.historyFile));
+        await fs.writeJSON(session.historyFile, { messages: session.messages }, { spaces: 2 });
+      }
     } catch (error) {
       clearTypingIndicator(typingInterval);
 
@@ -432,8 +475,70 @@ async function startChatSession(options: ChatOptions): Promise<void> {
     }
   }
 
-  // Close readline interface
+  // Close resources
   rl.close();
+  if (session.vectorDB) {
+    session.vectorDB.close();
+  }
+}
+
+/**
+ * Generate a response to the user's question
+ *
+ * This implements a simple RAG (Retrieval-Augmented Generation) workflow:
+ * 1. Uses retrieved code chunks as context
+ * 2. Builds a prompt with context and conversation history
+ * 3. Generates a response (currently uses a template-based approach)
+ *
+ * @param question - User's question
+ * @param context - Relevant code chunks
+ * @param history - Conversation history
+ * @returns Generated response
+ */
+async function generateResponse(
+  question: string,
+  context: CodeChunk[],
+  history: Array<{ role: 'user' | 'assistant'; content: string }>
+): Promise<string> {
+  // Build response
+  let response = '';
+
+  if (context.length > 0) {
+    response += `I found ${context.length} relevant code ${context.length === 1 ? 'section' : 'sections'}:\n`;
+
+    context.forEach((chunk, i) => {
+      const symbols = chunk.symbols.length > 0
+        ? `\n   Symbols: ${chunk.symbols.slice(0, 5).join(', ')}${chunk.symbols.length > 5 ? '...' : ''}`
+        : '';
+      response += `\n${i + 1}. ${chunk.filePath}:${chunk.startLine}-${chunk.endLine}${symbols}`;
+    });
+
+    response += '\n\n' + '─'.repeat(70);
+    response += `\n\nBased on the code, here's what I can tell you about "${question}":\n\n`;
+    response += `The codebase contains relevant sections that may help answer your question. `;
+
+    // Add context-specific hints
+    const hasSymbols = context.some(c => c.symbols && c.symbols.length > 0);
+    if (hasSymbols) {
+      const allSymbols = context.flatMap(c => c.symbols).slice(0, 10);
+      response += `I found references to: ${allSymbols.join(', ')}. `;
+    }
+
+    response += `\n\nNote: This is a simulated response. The full RAG implementation with ` +
+      `actual LLM integration will provide detailed explanations based on the ` +
+      `retrieved code context.`;
+  } else {
+    response += `I couldn't find any relevant code for "${question}".\n\n`;
+    response += `Suggestions:\n`;
+    response += `• Try rephrasing your question\n`;
+    response += `• Use function or class names from your codebase\n`;
+    response += `• Check if your code has been indexed with "prism index"\n`;
+    response += `• Run "prism search" to find relevant code manually\n`;
+    response += `\nNote: This is a simulated response. The full RAG implementation will ` +
+      `provide intelligent answers even without exact code matches.`;
+  }
+
+  return response;
 }
 
 /**

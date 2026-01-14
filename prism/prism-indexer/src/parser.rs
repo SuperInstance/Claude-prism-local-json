@@ -48,10 +48,10 @@ impl PrismParser {
         let root = tree.root_node();
         let has_errors = root.has_error();
 
-        // Extract code chunks
+        // Extract code chunks (now with function-level chunking)
         let chunks = crate::chunker::chunk_code(&root, code, &self.language_name);
 
-        // Extract functions and classes
+        // Extract functions and classes for metadata
         let functions = crate::extractor::extract_functions(&root, code);
         let classes = crate::extractor::extract_classes(&root, code);
 

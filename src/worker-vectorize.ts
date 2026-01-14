@@ -459,14 +459,17 @@ async function indexCode(
     }
 
     // Batch upsert to Vectorize
+    logger.info(`Upserting ${vectorsToUpsert.length} vectors to Vectorize...`);
     if (vectorsToUpsert.length > 0) {
       try {
         const upsertResult = await ctx.env.VECTORIZE.upsert(vectorsToUpsert);
-        logger.debug(`Vectorize upsert: ${upsertResult.mutationId}, ${vectorsToUpsert.length} vectors`);
+        logger.info(`Vectorize upsert: ${upsertResult.mutationId}, ${vectorsToUpsert.length} vectors`);
       } catch (error) {
         logger.error("Vectorize upsert failed:", error);
         // Data is safe in D1
       }
+    } else {
+      logger.warn("No vectors to upsert to Vectorize");
     }
 
     const duration = Date.now() - startTime;

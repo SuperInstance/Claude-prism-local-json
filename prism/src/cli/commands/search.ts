@@ -75,10 +75,13 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import path from 'path';
 import { loadConfig, expandTilde } from '../../config/loader.js';
 import { createSpinner } from '../progress.js';
 import { handleCLIError, createDBError } from '../errors.js';
 import type { SearchResult } from '../../core/types.js';
+import { SQLiteVectorDB } from '../../vector-db/SQLiteVectorDB.js';
+import { EmbeddingService, rankResults } from '../../core/embeddings.js';
 
 // ============================================================================
 // TYPES
@@ -94,6 +97,8 @@ import type { SearchResult } from '../../core/types.js';
  * - verbose: Show debugging information
  * - show-code: Include code snippets in output
  * - context-lines: Control snippet length
+ * - lang: Filter by programming language
+ * - path: Filter by file path pattern
  */
 interface SearchOptions {
   limit?: string;
@@ -102,6 +107,8 @@ interface SearchOptions {
   verbose?: boolean;
   'show-code'?: boolean;
   'context-lines'?: string;
+  lang?: string;
+  path?: string;
 }
 
 // ============================================================================
@@ -139,26 +146,29 @@ interface SearchOptions {
 function formatResult(result: SearchResult, index: number, showCode: boolean, contextLines: number): string {
   const lines: string[] = [];
 
+  // Extract from nested structure
+  const chunk = result.chunk;
+  const score = result.score;
+
   // Header with rank and score
-  const scorePercent = (result.score * 100).toFixed(1);
+  const scorePercent = (score * 100).toFixed(1);
   lines.push(
     chalk.bold.cyan(`\n${index + 1}. `) +
-      chalk.white(`${result.file}:${result.startLine}-${result.endLine}`) +
+      chalk.white(`${chunk.filePath}:${chunk.startLine}-${chunk.endLine}`) +
       chalk.gray(` (${scorePercent}% match)`)
   );
 
   // Language badge
-  lines.push(chalk.gray(`   Language: ${result.language}`));
+  lines.push(chalk.gray(`   Language: ${chunk.language}`));
 
   // Code snippet
   if (showCode) {
     lines.push(chalk.gray('   ' + '─'.repeat(60)));
 
-    const codeLines = result.text.split('\n');
-    const startLine = result.startLine;
+    const codeLines = chunk.content.split('\n');
 
     for (let i = 0; i < Math.min(codeLines.length, contextLines); i++) {
-      const lineNum = startLine + i;
+      const lineNum = chunk.startLine + i;
       const line = codeLines[i] || '';
       lines.push(
         chalk.gray(`${lineNum.toString().padStart(4)} │ `) +
@@ -212,13 +222,14 @@ function formatResultsJSON(results: SearchResult[]): string {
     {
       count: results.length,
       results: results.map((r) => ({
-        id: r.id,
-        file: r.file,
-        startLine: r.startLine,
-        endLine: r.endLine,
+        id: r.chunk.id,
+        file: r.chunk.filePath,
+        startLine: r.chunk.startLine,
+        endLine: r.chunk.endLine,
         score: r.score,
-        language: r.language,
-        text: r.text,
+        language: r.chunk.language,
+        text: r.chunk.content,
+        symbols: r.chunk.symbols,
       })),
     },
     null,
@@ -278,6 +289,8 @@ export function registerSearchCommand(program: Command): void {
     .option('-v, --verbose', 'Show detailed information')
     .option('--show-code', 'Show code snippets in results')
     .option('--context-lines <number>', 'Number of context lines to show', '5')
+    .option('--lang <language>', 'Filter by programming language')
+    .option('--path <pattern>', 'Filter by file path pattern')
     .action(async (query: string, options: SearchOptions) => {
       try {
         const spinner = createSpinner(options.verbose);
@@ -293,11 +306,9 @@ export function registerSearchCommand(program: Command): void {
         // ======================================================================
         // STEP 2: Validate Index Exists
         // ======================================================================
-        // Check if the vector database file exists before attempting search
         spinner.start('Loading index...');
         const dbPath = expandTilde(config.vectorDB.path || '~/.prism/vector.db');
 
-        // Check if index exists
         const fsModule = await import('fs-extra');
         if (!(await fsModule.pathExists(dbPath))) {
           spinner.fail('Index not found');
@@ -307,33 +318,70 @@ export function registerSearchCommand(program: Command): void {
           process.exit(1);
         }
 
-        // TODO: Load actual vector database
-        // const vectorDB = new MemoryVectorDB();
-        // await vectorDB.load(dbPath);
+        // Load vector database
+        const vectorDB = new SQLiteVectorDB({ path: dbPath });
+        const stats = vectorDB.getStats();
 
-        spinner.succeed('Index loaded');
+        if (stats.chunkCount === 0) {
+          spinner.fail('Index is empty');
+          console.error(chalk.red('\nNo chunks in the index.'));
+          console.error(chalk.yellow('\nTo create an index, run:'));
+          console.error(chalk.cyan('  prism index <path>'));
+          process.exit(1);
+        }
+
+        spinner.succeed(`Index loaded (${stats.chunkCount} chunks)`);
 
         // ======================================================================
-        // STEP 3: Perform Search
+        // STEP 3: Generate Query Embedding
         // ======================================================================
-        // Execute semantic search using vector similarity
+        spinner.start('Generating query embedding...');
+        const embeddingService = new EmbeddingService();
+        const queryEmbedding = embeddingService.generateEmbedding(query);
+        spinner.succeed('Query embedding generated');
+
+        // ======================================================================
+        // STEP 4: Perform Search
+        // ======================================================================
         spinner.start('Searching...');
-        // const limit = parseInt(options.limit || '10', 10);
-        // const minScore = parseFloat(options['min-score'] || '0.0');
+        const limit = parseInt(options.limit || '10', 10);
+        const minScore = parseFloat(options['min-score'] || '0.0');
 
         let results: SearchResult[] = [];
 
         try {
-          // TODO: Implement actual search
-          // 1. Generate query embedding
-          // 2. Query vector database
-          // 3. Rank by similarity score
-          // 4. Filter by min-score
-          // 5. Limit to N results
-          // results = await vectorDB.search(query, limit, minScore);
+          // Search vector database
+          const rawResults = await vectorDB.search(queryEmbedding, limit);
 
-          // AUDIT: Currently returns empty results - search not implemented
-          results = [];
+          // Apply filters
+          results = rawResults.filter((result) => {
+            // Filter by language
+            if (options.lang && result.chunk.language !== options.lang) {
+              return false;
+            }
+
+            // Filter by path pattern
+            if (options.path) {
+              const pattern = options.path.toLowerCase();
+              const filePath = result.chunk.filePath.toLowerCase();
+              if (!filePath.includes(pattern)) {
+                return false;
+              }
+            }
+
+            // Filter by minimum score
+            if (result.score < minScore) {
+              return false;
+            }
+
+            return true;
+          });
+
+          // Rank results
+          results = rankResults(results, minScore);
+
+          // Apply limit after filtering
+          results = results.slice(0, limit);
         } catch (error) {
           spinner.fail('Search failed');
           throw createDBError(
@@ -352,13 +400,11 @@ export function registerSearchCommand(program: Command): void {
         const duration = Date.now() - startTime;
 
         // ======================================================================
-        // STEP 4: Display Results
+        // STEP 5: Display Results
         // ======================================================================
-        // Output results in requested format (text or JSON)
         if (options.format === 'json') {
           console.log(formatResultsJSON(results));
         } else {
-          // Text mode output
           if (results.length === 0) {
             console.log(chalk.yellow('\nNo results found.\n'));
             console.log(chalk.gray('Tips for better searches:'));
@@ -366,6 +412,8 @@ export function registerSearchCommand(program: Command): void {
             console.log(chalk.gray('  • Try different variations of your query'));
             console.log(chalk.gray('  • Use function or class names'));
             console.log(chalk.gray('  • Check if the code has been indexed'));
+            console.log(chalk.gray('  • Lower the --min-score threshold'));
+            console.log(chalk.gray('  • Increase the --limit'));
           } else {
             const showCode = options['show-code'] || false;
             const contextLines = parseInt(options['context-lines'] || '5', 10);
@@ -378,7 +426,9 @@ export function registerSearchCommand(program: Command): void {
           }
         }
 
-        // Exit successfully
+        // Close database connection
+        vectorDB.close();
+
         process.exit(0);
       } catch (error) {
         handleCLIError(

@@ -34,6 +34,28 @@
  * - list_indexed_files: List all indexed files grouped by language
  * - get_chunk: Retrieve a specific chunk by ID
  *
+ * Embedding Service Configuration:
+ * ================================
+ * The MCP server uses semantic embeddings for search queries. Configure via:
+ *
+ * 1. Cloudflare Workers AI (Primary - Recommended):
+ *    - Free tier: 10,000 neurons/day
+ *    - Model: @cf/baai/bge-small-en-v1.5 (384 dimensions)
+ *    - Set environment variables:
+ *      export CLOUDFLARE_ACCOUNT_ID=your-account-id
+ *      export CLOUDFLARE_API_KEY=your-api-key
+ *
+ * 2. Ollama (Fallback - Local):
+ *    - Free, local inference
+ *    - Model: nomic-embed-text (768 dimensions)
+ *    - Requires Ollama running: ollama serve
+ *    - Default endpoint: http://localhost:11434
+ *
+ * 3. Hash-based Placeholder (Last Resort):
+ *    - Used when both providers are unavailable
+ *    - Issues warning to console
+ *    - Poor search quality (not semantic!)
+ *
  * Integration with Claude Code:
  * ----------------------------
  * 1. Add server to Claude Code settings.json:
@@ -41,7 +63,11 @@
  *      "mcpServers": {
  *        "prism": {
  *          "command": "node",
- *          "args": ["/path/to/prism/dist/mcp/cli.js", "--db", "./prism.db"]
+ *          "args": ["/path/to/prism/dist/mcp/cli.js", "--db", "./prism.db"],
+ *          "env": {
+ *            "CLOUDFLARE_ACCOUNT_ID": "your-account-id",
+ *            "CLOUDFLARE_API_KEY": "your-api-key"
+ *          }
  *        }
  *      }
  *    }
@@ -100,6 +126,7 @@ import {
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { IVectorDB } from '../vector-db/index.js';
 import type { CodeChunk } from '../core/types.js';
+import { EmbeddingService } from '../embeddings/index.js';
 
 /**
  * ============================================================================
@@ -118,6 +145,8 @@ import type { CodeChunk } from '../core/types.js';
  * -------------------
  * @param maxResults - Default maximum number of results to return from searches
  *                     (default: 10). Can be overridden per-request.
+ * @param embeddingService - Custom embedding service instance. If not provided,
+ *                           a default one will be created using environment variables.
  *
  * Example:
  * -------
@@ -125,92 +154,21 @@ import type { CodeChunk } from '../core/types.js';
  *   vectorDB: new SQLiteVectorDB({ path: './prism.db' }),
  *   maxResults: 20
  * });
+ *
+ * // With custom embedding service
+ * const server = new PrismMCPServer({
+ *   vectorDB: new SQLiteVectorDB({ path: './prism.db' }),
+ *   maxResults: 20,
+ *   embeddingService: new EmbeddingService({
+ *     cloudflareAccountId: 'your-account-id',
+ *     cloudflareApiKey: 'your-api-key'
+ *   })
+ * });
  */
 export interface PrismMCPServerConfig {
   vectorDB: IVectorDB;
   maxResults?: number;
-}
-
-/**
- * ============================================================================
- * EMBEDDING GENERATION (PLACEHOLDER)
- * ============================================================================
- *
- * CRITICAL AUDIT FINDING:
- * ----------------------
- * This function generates a hash-based "embedding" that is MEANINGLESS for
- * semantic search. The current implementation:
- *
- * 1. Creates a 384-dimensional vector based on character hash codes
- * 2. Does NOT capture semantic meaning of the text
- * 3. Will NOT find similar code based on functionality or intent
- * 4. ONLY matches text with identical or similar character patterns
- *
- * Why This Doesn't Work:
- * ---------------------
- * - Hash embeddings are deterministic but semantically random
- * - Similar queries like "auth" and "authentication" produce unrelated vectors
- * - Code meaning is not preserved in the hash-based representation
- * - Vector similarity scores are meaningless for search relevance
- *
- * What This Means:
- * ---------------
- * - search_repo will NOT return semantically relevant results
- * - "find user" and "get user" will not be considered similar
- * - The tool appears to work but returns poor quality results
- *
- * Required Fix for Production:
- * ---------------------------
- * Replace this with actual embedding service:
- *
- * Option 1: Cloudflare Workers AI (Free tier)
- *   const response = fetch('https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/embeddings', {
- *     method: 'POST',
- *     headers: { 'Authorization': 'Bearer {token}' },
- *     body: JSON.stringify({ text, model: '@cf/baai/bge-small-en-v1.5' })
- *   });
- *
- * Option 2: Ollama (Local, free)
- *   const response = fetch('http://localhost:11434/api/embeddings', {
- *     method: 'POST',
- *     body: JSON.stringify({ model: 'nomic-embed-text', prompt: text })
- *   });
- *
- * Option 3: OpenAI API (Paid)
- *   const response = fetch('https://api.openai.com/v1/embeddings', {
- *     method: 'POST',
- *     headers: { 'Authorization': 'Bearer {key}' },
- *     body: JSON.stringify({ input: text, model: 'text-embedding-3-small' })
- *   });
- *
- * Target Embedding Models:
- * -----------------------
- * - BGE-small-en-v1.5 (384d) - Fast, good for code
- * - bge-base-en-v1.5 (768d) - Better accuracy
- * - nomic-embed-text (768d) - Local via Ollama
- * - text-embedding-3-small (1536d) - OpenAI
- *
- * @param text - Input text to generate embedding for
- * @returns Normalized 384-dimensional vector (currently meaningless)
- *
- * @deprecated This is a placeholder. Use actual embedding service in production.
- * @see docs/research/02-embedding-model-comparison.md
- */
-async function generateEmbedding(text: string): Promise<number[]> {
-  // ⚠️ CRITICAL: This is a placeholder that doesn't work for semantic search
-  // Simple hash-based embedding for now
-  // This is a placeholder - in production, use actual embeddings
-  const embedding = new Array(384).fill(0);
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-    embedding[i % 384] = (hash % 1000) / 1000;
-  }
-
-  // Normalize
-  const norm = Math.sqrt(embedding.reduce((sum, v) => sum + v * v, 0));
-  return embedding.map((v) => (norm > 0 ? v / norm : 0));
+  embeddingService?: EmbeddingService;
 }
 
 /**
@@ -270,6 +228,9 @@ export class PrismMCPServer {
   /** Default maximum results to return from search tools */
   private maxResults: number;
 
+  /** Embedding service for generating query embeddings */
+  private embeddingService: EmbeddingService;
+
   /**
    * Create a new Prism MCP Server instance.
    *
@@ -282,6 +243,9 @@ export class PrismMCPServer {
   constructor(config: PrismMCPServerConfig) {
     this.vectorDB = config.vectorDB;
     this.maxResults = config.maxResults || 10;
+
+    // Initialize embedding service (use provided or create default)
+    this.embeddingService = config.embeddingService || new EmbeddingService();
 
     // Create MCP server with SDK
     // The server handles JSON-RPC protocol details (parsing, validation, etc)
@@ -435,9 +399,16 @@ export class PrismMCPServer {
       // - "Find error handling patterns"
       // - "Where is the database connection code?"
       //
+      // Features:
+      // - Uses Cloudflare Workers AI embeddings (free tier)
+      // - Falls back to Ollama if available
+      // - Returns semantically similar code chunks
+      // - Supports similarity score filtering
+      //
       // Limitations:
       // - Requires indexed codebase (run 'prism index' first)
-      // - Quality depends on embedding model (see CRITICAL AUDIT above)
+      // - Requires CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_KEY env vars
+      //   or Ollama running locally for best results
       // - Returns chunks, not full files
       //
       // Example Call:
@@ -701,19 +672,27 @@ export class PrismMCPServer {
    * Performs vector similarity search to find code chunks related to the query.
    *
    * Algorithm:
-   * 1. Generate embedding for query text
+   * 1. Generate embedding for query text using EmbeddingService
    * 2. Search vector DB for similar chunks
    * 3. Filter results by minimum score
    * 4. Return formatted results
    *
    * Performance:
-   * - Query embedding: ~10ms (placeholder) / ~100ms (real model)
+   * - Query embedding: ~100-300ms (Cloudflare) / ~500-2000ms (Ollama)
    * - Vector search: ~50ms for 10K chunks
-   * - Total: <200ms for typical queries
+   * - Total: <500ms for typical queries with caching
    *
-   * Known Issues:
-   * - Hash-based embeddings are meaningless (see CRITICAL AUDIT above)
-   * - Results will be poor quality until fixed
+   * Embedding Provider:
+   * - Primary: Cloudflare Workers AI (@cf/baai/bge-small-en-v1.5)
+   * - Fallback: Ollama (nomic-embed-text)
+   * - Last Resort: Hash-based placeholder (issues warning)
+   *
+   * Configuration:
+   * Set environment variables for Cloudflare:
+   * - CLOUDFLARE_ACCOUNT_ID
+   * - CLOUDFLARE_API_KEY
+   *
+   * Or ensure Ollama is running locally at http://localhost:11434
    *
    * @param args - Tool arguments (query, limit, minScore)
    * @returns Formatted search results
@@ -729,9 +708,9 @@ export class PrismMCPServer {
       throw new Error('Query is required');
     }
 
-    // Generate query embedding
-    // ⚠️ TODO: Replace with real embedding service
-    const queryEmbedding = await generateEmbedding(query);
+    // Generate query embedding using the embedding service
+    // This will use Cloudflare, Ollama, or fallback to hash-based placeholder
+    const queryEmbedding = await this.embeddingService.embed(query);
 
     // Search vector database
     // Get 2x results to allow for filtering by minScore
@@ -741,7 +720,7 @@ export class PrismMCPServer {
     const filtered = results
       .filter((r) => r.score >= minScore)
       .slice(0, limit)
-      .map(this.formatSearchResult);
+      .map((r) => this.formatSearchResult(r));
 
     if (filtered.length === 0) {
       return `No results found for query: "${query}"`;

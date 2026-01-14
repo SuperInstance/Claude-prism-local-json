@@ -308,21 +308,23 @@ export class WasmIndexer implements IIndexer {
     const maxSize = options.max_size || 512;
     const chunks: CodeChunk[] = [];
 
-    for (const rustChunk of parseResult.chunks) {
-      // Convert Rust chunk to TypeScript CodeChunk
+    for (const wasmChunk of parseResult.chunks) {
+      // Convert WASM chunk to TypeScript CodeChunk
+      const kind = this.inferChunkKind(wasmChunk);
+
       chunks.push({
-        id: rustChunk.id,
+        id: wasmChunk.id,
         filePath: '', // Will be filled by caller
-        name: this.extractChunkName(rustChunk),
-        kind: this.inferChunkKind(rustChunk),
-        startLine: rustChunk.start_line,
-        endLine: rustChunk.end_line,
-        content: rustChunk.text,
-        language: rustChunk.language,
+        name: this.extractChunkName(wasmChunk),
+        kind,
+        startLine: wasmChunk.start_line,
+        endLine: wasmChunk.end_line,
+        content: wasmChunk.text,
+        language: wasmChunk.language,
         metadata: {
-          exports: [],
-          imports: [],
-          dependencies: rustChunk.dependencies,
+          exports: wasmChunk.functions.filter(f => f.is_exported).map(f => f.name),
+          imports: wasmChunk.imports.map(imp => imp.source),
+          dependencies: wasmChunk.dependencies,
         },
       });
     }
@@ -387,25 +389,30 @@ export class WasmIndexer implements IIndexer {
     result: ParseResult,
     filePath: string
   ): CodeChunk[] {
-    return result.chunks.map(chunk => ({
-      id: chunk.id,
-      filePath,
-      name: this.extractChunkName(chunk),
-      kind: this.inferChunkKind(chunk),
-      startLine: chunk.start_line,
-      endLine: chunk.end_line,
-      content: chunk.text,
-      language: chunk.language,
-      metadata: {
-        exports: [],
-        imports: [],
-        dependencies: chunk.dependencies,
-      },
-    }));
+    return result.chunks.map(wasmChunk => {
+      // Convert WASM chunk to PRISM CodeChunk format
+      const kind = this.inferChunkKind(wasmChunk);
+
+      return {
+        id: wasmChunk.id,
+        filePath,
+        name: this.extractChunkName(wasmChunk),
+        kind,
+        startLine: wasmChunk.start_line,
+        endLine: wasmChunk.end_line,
+        content: wasmChunk.text,
+        language: wasmChunk.language,
+        metadata: {
+          exports: wasmChunk.functions.filter(f => f.is_exported).map(f => f.name),
+          imports: wasmChunk.imports.map(imp => imp.source),
+          dependencies: wasmChunk.dependencies,
+        },
+      };
+    });
   }
 
   /**
-   * Extract a human-readable name from a chunk
+   * Extract a human-readable name from a WASM chunk
    */
   private extractChunkName(chunk: any): string {
     // Try to get name from functions
@@ -432,6 +439,12 @@ export class WasmIndexer implements IIndexer {
 
     if (chunk.functions && chunk.functions.length > 0) {
       return 'function';
+    }
+
+    // Check if it's imports/exports only
+    if (chunk.imports && chunk.imports.length > 0 &&
+        chunk.text.split('\n').length < 20) {
+      return 'imports';
     }
 
     return 'function'; // Default

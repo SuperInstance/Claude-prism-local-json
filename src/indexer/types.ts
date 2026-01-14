@@ -16,14 +16,50 @@ export interface ParseResult {
   /** Error nodes if parsing failed */
   error_nodes: ErrorNode[];
 
-  /** Extracted code chunks */
-  chunks: CodeChunk[];
+  /** Extracted code chunks (now function-level) */
+  chunks: WASMCodeChunk[];
 
   /** Extracted functions */
   functions: FunctionInfo[];
 
   /** Extracted classes */
   classes: ClassInfo[];
+}
+
+/**
+ * WASM Code Chunk (from Rust)
+ * This is the raw chunk format returned by the WASM module
+ */
+export interface WASMCodeChunk {
+  /** Unique chunk identifier */
+  id: string;
+
+  /** Chunk text content */
+  text: string;
+
+  /** Starting line number (1-indexed) */
+  start_line: number;
+
+  /** Ending line number (1-indexed) */
+  end_line: number;
+
+  /** Estimated token count */
+  tokens: number;
+
+  /** Programming language */
+  language: string;
+
+  /** Functions in this chunk */
+  functions: FunctionInfo[];
+
+  /** Classes in this chunk */
+  classes: ClassInfo[];
+
+  /** Import statements */
+  imports: ImportInfo[];
+
+  /** Dependencies extracted from chunk */
+  dependencies: string[];
 }
 
 /**
@@ -138,6 +174,12 @@ export interface ChunkOptions {
 
   /** Use semantic boundaries (functions, classes) */
   semantic?: boolean;
+
+  /** Include docstrings and comments */
+  include_docs?: boolean;
+
+  /** Include imports with each chunk */
+  include_imports?: boolean;
 }
 
 /**
@@ -169,4 +211,32 @@ export interface LanguageDetection {
 
   /** File extension */
   extension: string;
+}
+
+/**
+ * Chunking strategy
+ */
+export type ChunkingStrategy = 'tree-sitter' | 'line-based' | 'hybrid';
+
+/**
+ * Chunking configuration
+ */
+export interface ChunkingConfig {
+  /** Chunking strategy to use */
+  strategy: ChunkingStrategy;
+
+  /** Maximum chunk size in tokens */
+  maxChunkSize?: number;
+
+  /** Number of context lines to include */
+  contextLines?: number;
+
+  /** Enable caching of parsed ASTs */
+  enableCache?: boolean;
+
+  /** Supported languages */
+  supportedLanguages?: string[];
+
+  /** Maximum cache size */
+  cacheSize?: number;
 }

@@ -214,17 +214,50 @@ export function detectLanguage(path: string): string {
 // ============================================================================
 
 /**
- * Split file content into chunks
+ * Chunking strategy type
+ */
+export type ChunkingStrategy = 'tree-sitter' | 'line-based' | 'hybrid';
+
+/**
+ * Chunking options
+ */
+export interface ChunkingOptions {
+  /** Maximum lines per chunk */
+  maxLines?: number;
+  /** Chunking strategy to use */
+  strategy?: ChunkingStrategy;
+  /** Include imports with each chunk */
+  includeImports?: boolean;
+  /** Include docstrings/comments */
+  includeDocs?: boolean;
+}
+
+/**
+ * Split file content into chunks (fallback line-based method)
+ *
+ * This is a simple line-based chunking strategy used when:
+ * - Tree-sitter WASM is not available
+ * - The file type is not supported
+ * - Performance constraints require simple chunking
+ *
+ * For better semantic chunking, use the WASM-based WasmIndexer.
+ *
  * @param filePath - File path for error reporting
  * @param content - File content
  * @param language - Detected language
+ * @param options - Chunking options
  * @returns Array of chunks
  * @throws Error if content is too large
  */
-export function chunkFile(filePath: string, content: string, language: string): Chunk[] {
+export function chunkFile(
+  filePath: string,
+  content: string,
+  language: string,
+  options?: ChunkingOptions
+): Chunk[] {
   const lines = content.split("\n");
   const chunks: Chunk[] = [];
-  const maxLinesPerChunk = CONFIG.MAX_LINES_PER_CHUNK;
+  const maxLinesPerChunk = options?.maxLines ?? CONFIG.MAX_LINES_PER_CHUNK;
   let startLine = 0;
 
   while (startLine < lines.length) {
@@ -253,6 +286,58 @@ export function chunkFile(filePath: string, content: string, language: string): 
   }
 
   return chunks;
+}
+
+/**
+ * Intelligent chunking that tries to use WASM-based semantic chunking first
+ *
+ * This function provides a hybrid approach:
+ * 1. First tries to use the WASM indexer for function-level chunking
+ * 2. Falls back to line-based chunking if WASM is unavailable
+ *
+ * @param filePath - File path
+ * @param content - File content
+ * @param language - Detected language
+ * @param options - Chunking options
+ * @returns Promise of chunk array
+ */
+export async function intelligentChunk(
+  filePath: string,
+  content: string,
+  language: string,
+  options?: ChunkingOptions
+): Promise<Chunk[]> {
+  const strategy = options?.strategy ?? 'hybrid';
+
+  // If strategy is line-based or we're in a non-WASM environment, use line-based
+  if (strategy === 'line-based' || typeof WebAssembly === 'undefined') {
+    return chunkFile(filePath, content, language, options);
+  }
+
+  // Try to use WASM-based chunking
+  try {
+    // Dynamic import of WasmIndexer
+    const { WasmIndexer } = await import('../indexer/WasmIndexer.js');
+    const indexer = new WasmIndexer();
+
+    // Initialize the indexer
+    await indexer.init();
+
+    // Parse the file
+    const parseResult = await indexer.parseFile(content, language);
+
+    // Convert WASM chunks to the legacy Chunk format
+    return parseResult.chunks.map(wasmChunk => ({
+      content: wasmChunk.text,
+      startLine: wasmChunk.start_line,
+      endLine: wasmChunk.end_line,
+      language: wasmChunk.language
+    }));
+  } catch (error) {
+    // Fall back to line-based chunking if WASM fails
+    console.warn(`WASM chunking failed for ${filePath}, falling back to line-based:`, error);
+    return chunkFile(filePath, content, language, options);
+  }
 }
 
 // ============================================================================
