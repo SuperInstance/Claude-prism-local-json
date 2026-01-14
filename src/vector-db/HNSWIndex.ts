@@ -23,6 +23,7 @@
  */
 
 import HNSWLib from 'hnswlib-node';
+import { writeFile, readFile } from 'node:fs/promises';
 
 // ============================================================================
 // TYPES
@@ -229,18 +230,24 @@ export class HNSWIndex {
       );
     }
 
+    // Cap k to maxElements (HNSW constraint)
+    const effectiveK = Math.min(k, this.maxElements);
+
     // Override ef if provided
     if (ef !== undefined) {
       this.index.setEf(ef);
     }
 
     // Search HNSW index
-    const results = this.index.searchKnn(queryVector, k);
+    const results = this.index.searchKnn(queryVector, effectiveK);
 
     // Convert internal IDs to external IDs
     const neighbors: Array<{ id: string; score: number }> = [];
 
-    for (const [internalId, score] of results) {
+    // SearchResult has { neighbors: number[], distances: number[] }
+    for (let i = 0; i < results.neighbors.length; i++) {
+      const internalId = results.neighbors[i];
+      const score = 1 - results.distances[i]; // Convert distance to similarity (cosine)
       const externalId = this.internalToExternal.get(internalId);
       if (externalId !== undefined) {
         neighbors.push({ id: externalId, score });
@@ -397,7 +404,7 @@ export class HNSWIndex {
       // Save ID mappings if path provided
       if (mappingsPath) {
         const mappings = this.serializeMappings();
-        await Bun.write(mappingsPath, JSON.stringify(mappings, null, 2));
+        await writeFile(mappingsPath, JSON.stringify(mappings, null, 2), 'utf-8');
       }
 
       this.dirty = false;
@@ -426,13 +433,13 @@ export class HNSWIndex {
 
     try {
       // Load HNSW index structure
-      index.index.loadIndex(indexPath);
+      await index.index.readIndex(indexPath);
 
       // Load ID mappings if path provided
       if (mappingsPath) {
-        const mappingsData = await Bun.read(mappingsPath);
+        const mappingsData = await readFile(mappingsPath, 'utf-8');
         if (mappingsData) {
-          const mappings = JSON.parse(mappingsData.toString()) as {
+          const mappings = JSON.parse(mappingsData) as {
             internalToExternal: [number, string][];
             externalToInternal: [string, number][];
             nextId: number;
