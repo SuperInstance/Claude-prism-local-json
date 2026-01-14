@@ -49,15 +49,15 @@ CREATE TABLE IF NOT EXISTS vector_chunks (
   -- Timestamps
   created_at INTEGER NOT NULL,  -- Unix timestamp (ms)
   updated_at INTEGER NOT NULL,  -- Unix timestamp (ms)
-  deleted_at INTEGER,           -- Unix timestamp (ms), NULL = not deleted
-
-  -- Indexes for common queries
-  INDEX idx_file_path (file_path),
-  INDEX idx_language (language),
-  INDEX idx_checksum (checksum),
-  INDEX idx_deleted_at (deleted_at),
-  INDEX idx_created_at (created_at)
+  deleted_at INTEGER            -- Unix timestamp (ms), NULL = not deleted
 );
+
+-- Create indexes for vector_chunks
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_file_path ON vector_chunks(file_path);
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_language ON vector_chunks(language);
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_checksum ON vector_chunks(checksum);
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_deleted_at ON vector_chunks(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_vector_chunks_created_at ON vector_chunks(created_at);
 
 -- ============================================================================
 -- FILE INDEX TABLE
@@ -80,13 +80,13 @@ CREATE TABLE IF NOT EXISTS file_index (
   last_indexed INTEGER NOT NULL,   -- Last indexing time (Unix timestamp)
 
   -- Chunk tracking
-  chunk_count INTEGER DEFAULT 0,  -- Number of chunks indexed
-
-  -- Indexes for efficient queries
-  INDEX idx_checksum (checksum),
-  INDEX idx_last_modified (last_modified),
-  INDEX idx_last_indexed (last_indexed)
+  chunk_count INTEGER DEFAULT 0  -- Number of chunks indexed
 );
+
+-- Create indexes for file_index
+CREATE INDEX IF NOT EXISTS idx_file_index_checksum ON file_index(checksum);
+CREATE INDEX IF NOT EXISTS idx_file_index_last_modified ON file_index(last_modified);
+CREATE INDEX IF NOT EXISTS idx_file_index_last_indexed ON file_index(last_indexed);
 
 -- ============================================================================
 -- HNSW INDEX METADATA
@@ -111,10 +111,11 @@ CREATE TABLE IF NOT EXISTS hnsw_metadata (
 
   -- Index versioning
   version TEXT NOT NULL DEFAULT '1.0.0',         -- HNSW algorithm version
-  index_format TEXT NOT NULL DEFAULT 'hnswlib',  -- Index format identifier
-
-  INDEX idx_vector_count (vector_count)
+  index_format TEXT NOT NULL DEFAULT 'hnswlib'   -- Index format identifier
 );
+
+-- Create index for hnsw_metadata
+CREATE INDEX IF NOT EXISTS idx_hnsw_metadata_vector_count ON hnsw_metadata(vector_count);
 
 -- Insert default HNSW metadata
 INSERT OR IGNORE INTO hnsw_metadata (
@@ -152,12 +153,12 @@ CREATE TABLE IF NOT EXISTS deleted_files (
   chunk_count INTEGER DEFAULT 0,     -- Number of chunks to clean up
 
   -- Cleanup status
-  cleaned_up INTEGER DEFAULT 0,      -- Boolean: 0 = not cleaned, 1 = cleaned
-
-  -- Indexes for cleanup queries
-  INDEX idx_deleted_at (deleted_at),
-  INDEX idx_cleaned_up (cleaned_up)
+  cleaned_up INTEGER DEFAULT 0       -- Boolean: 0 = not cleaned, 1 = cleaned
 );
+
+-- Create indexes for deleted_files
+CREATE INDEX IF NOT EXISTS idx_deleted_files_deleted_at ON deleted_files(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_deleted_files_cleaned_up ON deleted_files(cleaned_up);
 
 -- ============================================================================
 -- MIGRATION NOTES
