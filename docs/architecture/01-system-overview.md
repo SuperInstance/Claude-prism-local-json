@@ -1,13 +1,13 @@
 # System Overview
 
-**Component**: Vantage (Claude's Friend) - Architecture Overview
+**Component**: PRISM - Architecture Overview
 **Status**: Design Document
 **Priority**: Foundational
 **Last Updated**: 2026-01-13
 
 ## Purpose
 
-Vantage is a super-agent plugin for Claude Code that saves 90%+ tokens through intelligent vector-based RAG (Retrieval-Augmented Generation). This document provides a high-level overview of the entire system architecture, components, technology choices, and design principles.
+PRISM is a super-agent plugin for Claude Code that saves 90%+ tokens through intelligent vector-based RAG (Retrieval-Augmented Generation). This document provides a high-level overview of the entire system architecture, components, technology choices, and design principles.
 
 ---
 
@@ -99,7 +99,7 @@ Vantage is a super-agent plugin for Claude Code that saves 90%+ tokens through i
 USER QUERY
     │
     ▼
-[Claude Code] ──MCP──▶ [Vantage CLI]
+[Claude Code] ──MCP──▶ [PRISM CLI]
     │                           │
     │                           ▼
     │                    [Command Router]
@@ -131,7 +131,7 @@ USER QUERY
 
 ### 2.1 CLI Interface
 
-**Purpose**: Entry point for all Vantage operations
+**Purpose**: Entry point for all PRISM operations
 
 **Responsibilities**:
 - Parse command-line arguments
@@ -313,7 +313,7 @@ function routeModel(tokens: number, complexity: number): Model {
 
 ### 2.6 MCP Server
 
-**Purpose**: Expose Vantage capabilities to Claude Code via MCP protocol
+**Purpose**: Expose PRISM capabilities to Claude Code via MCP protocol
 
 **Technology**: Python FastMCP or TypeScript MCP SDK
 
@@ -679,7 +679,7 @@ interface UsageStats {
 
 ```
 Developer Machine
-├── Vantage CLI (local)
+├── PRISM CLI (local)
 ├── SQLite (local vector DB)
 ├── Tree-sitter WASM (local parsing)
 ├── Ollama (optional local LLM)
@@ -688,7 +688,7 @@ Developer Machine
 
 **Setup**:
 ```bash
-# Install Vantage
+# Install PRISM
 npm install -g @vantage/cli
 
 # Initialize project

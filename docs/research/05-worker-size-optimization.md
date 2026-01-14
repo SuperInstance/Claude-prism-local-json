@@ -786,7 +786,7 @@ dayjs().format('YYYY-MM-DD');
 
 ### 4. Vector Search Libraries
 
-**For Vantage (RAG applications):**
+**For PRISM (RAG applications):**
 
 | Approach | Size | Performance | Recommendation |
 |----------|------|-------------|----------------|
@@ -1286,6 +1286,6 @@ export async function trackBundleSize() {
 
 **Last Updated**: January 2025
 
-**Maintained by**: Vantage Development Team
+**Maintained by**: PRISM Development Team
 
 **Questions?** See the [Cloudflare Workers Community](https://community.cloudflare.com/c/workers/6) or [Cloudflare Discord](https://discord.gg/cloudflaredev).

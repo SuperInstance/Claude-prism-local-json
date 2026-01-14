@@ -1,4 +1,4 @@
-# Killer Features for Cloudflare Super-Agent (Claude's Friend)
+# Killer Features for Cloudflare Super-Agent (PRISM)
 
 **Research Date**: 2026-01-13
 **Researcher**: Claude
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document identifies 100+ features that would make Claude's Friend the most talked-about developer tool of 2026, with detailed prioritization scoring and "HackerNews Moment" analysis. Features are categorized by type, impact, feasibility, differentiation, and viral potential.
+This document identifies 100+ features that would make PRISM the most talked-about developer tool of 2026, with detailed prioritization scoring and "HackerNews Moment" analysis. Features are categorized by type, impact, feasibility, differentiation, and viral potential.
 
 **Key Findings:**
 - The biggest competitive gap is **AI-native CLI discoverability** - the #1 pain point in 2025
@@ -567,11 +567,11 @@ Done! Your app is live.
 ```
 $ cf chat "how does the auth flow work?"
 
-[Without Claude's Friend]
+[Without PRISM]
 Context: 15,234 tokens
 Cost: $0.047
 
-[With Claude's Friend]
+[With PRISM]
 Context: 280 tokens (optimized from 15,234)
 Cost: $0.0009
 Saved: 98.1%
@@ -1040,7 +1040,7 @@ Incident resolved in 46 seconds. Human time: 5 seconds.
 
 ### 7.1 Positioning Statement
 
-> **"Claude's Friend is the AI-native developer companion that turns Cloudflare Workers into the world's most intelligent development platform."**
+> **"PRISM is the AI-native developer companion that turns Cloudflare Workers into the world's most intelligent development platform."**
 
 ### 7.2 Competitive Moats
 
@@ -1140,7 +1140,7 @@ Incident resolved in 46 seconds. Human time: 5 seconds.
 ### 8.1 Core Messaging
 
 #### **Primary Message**
-> "Stop paying for tokens you don't need. Claude's Friend saves you 90% on AI costs while making you more productive."
+> "Stop paying for tokens you don't need. PRISM saves you 90% on AI costs while making you more productive."
 
 #### **Supporting Messages**
 - "Finally, a CLI that understands English"
@@ -1385,7 +1385,7 @@ Incident resolved in 46 seconds. Human time: 5 seconds.
 
 ### Final Thoughts
 
-The developer tools landscape is ready for disruption. AI has transformed how we write code, but the tooling around it hasn't kept up. Claude's Friend can bridge that gap by:
+The developer tools landscape is ready for disruption. AI has transformed how we write code, but the tooling around it hasn't kept up. PRISM can bridge that gap by:
 
 - Making AI 10x cheaper (token optimization)
 - Making CLIs 10x easier (natural language)
@@ -1394,7 +1394,7 @@ The developer tools landscape is ready for disruption. AI has transformed how we
 
 The features outlined in this document aren't just nice-to-haves—they're the foundation of a new category: **AI-native development platforms**.
 
-By leveraging Cloudflare's unique capabilities and solving real developer pain points, Claude's Friend can become the most talked-about developer tool of 2026.
+By leveraging Cloudflare's unique capabilities and solving real developer pain points, PRISM can become the most talked-about developer tool of 2026.
 
 **Let's build something developers will shout about.**
 

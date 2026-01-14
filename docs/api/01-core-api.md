@@ -1,13 +1,13 @@
 # Core API Specification
 
-**Component**: Vantage Core API
+**Component**: PRISM Core API
 **Status**: Design Document
 **Priority**: Foundational
 **Last Updated**: 2026-01-13
 
 ## Purpose
 
-This document specifies the complete API surface for Vantage, including CLI commands, TypeScript interfaces, MCP tools, and error codes. All APIs are designed with type safety, clear documentation, and backward compatibility in mind.
+This document specifies the complete API surface for PRISM, including CLI commands, TypeScript interfaces, MCP tools, and error codes. All APIs are designed with type safety, clear documentation, and backward compatibility in mind.
 
 ---
 
@@ -24,7 +24,7 @@ This document specifies the complete API surface for Vantage, including CLI comm
 
 ### 1.1 Command Overview
 
-Vantage exposes a single CLI entry point `prism` with subcommands for different operations.
+PRISM exposes a single CLI entry point `prism` with subcommands for different operations.
 
 ```bash
 prism [command] [options]
@@ -357,7 +357,7 @@ prism stats --format json --verbose
 
 **Output** (text format):
 ```
-Vantage Token Usage Statistics
+PRISM Token Usage Statistics
 =============================
 
 Session (since 2 hours ago):
@@ -672,7 +672,7 @@ interface ModelInfo {
 
 ### 3.1 Tool Overview
 
-Vantage exposes tools via the Model Context Protocol for integration with Claude Code.
+PRISM exposes tools via the Model Context Protocol for integration with Claude Code.
 
 ### 3.2 search_repo
 
@@ -949,7 +949,7 @@ interface ExplainUsageTool {
 All errors follow a consistent structure:
 
 ```typescript
-interface VantageError {
+interface PRISMError {
   code: string;           // Error code (e.g., VANTAGE_001)
   name: string;           // Error name (e.g., ParseError)
   message: string;        // Human-readable message
@@ -1166,7 +1166,7 @@ $ prism search "auth" --format json
 
 ### 5.1 API Versioning
 
-Vantage uses semantic versioning for API compatibility:
+PRISM uses semantic versioning for API compatibility:
 
 ```
 MAJOR.MINOR.PATCH

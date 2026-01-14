@@ -8,13 +8,15 @@ Welcome to PRISM! This directory contains comprehensive user guides for PRISM, a
 **New to PRISM? Start here!**
 
 - What is PRISM and why use it
-- Installation instructions (npm, git clone)
-- First-time setup
-- Quick start tutorial
-- Verification steps
-- Common workflows
+- Installation instructions (npm, yarn, pnpm, git clone)
+- System requirements and verification
+- First-time setup and initialization
+- Indexing your codebase
+- Your first search and chat queries
+- Common workflows and troubleshooting
+- Integration with Claude Code
 
-**Time to read**: 15 minutes
+**Time to read**: 20 minutes
 
 ---
 

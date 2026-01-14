@@ -1,13 +1,13 @@
 # Embedding Model Comparison for Code Search
 
-**Research Document for Vantage**
+**Research Document for PRISM**
 *Published: January 13, 2026*
 
 ## Executive Summary
 
-This document provides a comprehensive comparison of embedding models for semantic code search, with specific recommendations for Vantage running on Cloudflare's free tier. After analyzing general-purpose embeddings, code-specific models, Cloudflare Workers AI availability, and cost constraints, we recommend a **hybrid approach** using **BGE-small-en-v1.5** as the primary model with **local Ollama-based nomic-embed-code** as a fallback.
+This document provides a comprehensive comparison of embedding models for semantic code search, with specific recommendations for PRISM running on Cloudflare's free tier. After analyzing general-purpose embeddings, code-specific models, Cloudflare Workers AI availability, and cost constraints, we recommend a **hybrid approach** using **BGE-small-en-v1.5** as the primary model with **local Ollama-based nomic-embed-code** as a fallback.
 
-**Key Finding:** With 10K neurons/day on Cloudflare's free tier, Vantage can embed approximately **5.4M code chunks per month** using BGE-small-en-v1.5, making it sustainable for production use.
+**Key Finding:** With 10K neurons/day on Cloudflare's free tier, PRISM can embed approximately **5.4M code chunks per month** using BGE-small-en-v1.5, making it sustainable for production use.
 
 ---
 

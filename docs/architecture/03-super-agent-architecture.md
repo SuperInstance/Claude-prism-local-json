@@ -547,7 +547,7 @@ interface SecurityModel {
   authentication: {
     // JWT-based API authentication
     jwt: {
-      issuer: "https://api.claudes-friend.com";
+      issuer: "https://api.prism.com";
       audience: "claude-code-plugin";
       algorithm: "RS256";
       expiresIn: "1h";
@@ -1242,15 +1242,15 @@ export default {
 ### A.1 Wrangler Configuration
 
 ```toml
-name = "claudes-friend-super-agent"
+name = "prism-super-agent"
 main = "src/workers/index.ts"
 compatibility_date = "2024-01-01"
 
 [env.development]
-name = "claudes-friend-super-agent-dev"
+name = "prism-super-agent-dev"
 
 [env.production]
-name = "claudes-friend-super-agent-prod"
+name = "prism-super-agent-prod"
 routes = [
   { pattern = "api.claudesfriend.com/*", zone_name = "claudesfriend.com" }
 ]
@@ -1272,13 +1272,13 @@ id = "your-kv-namespace-id"
 # D1 bindings
 [[d1_databases]]
 binding = "DB"
-database_name = "claudes-friend-db"
+database_name = "prism-db"
 database_id = "your-database-id"
 
 # R2 bindings
 [[r2_buckets]]
 binding = "R2_STORAGE"
-bucket_name = "claudes-friend-artifacts"
+bucket_name = "prism-artifacts"
 
 # Vectorize bindings
 [[vectorize]]
@@ -1304,7 +1304,7 @@ binding = "ANALYTICS"
 ```json
 {
   "mcpServers": {
-    "claudes-friend": {
+    "prism": {
       "command": "python",
       "args": [
         "-m", "vantage.mcp_server",

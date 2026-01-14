@@ -227,6 +227,87 @@ Storage: .prism/vectors.db (12.4 MB)
 
 ---
 
+## First Run
+
+### 1. Navigate to Your Project
+
+```bash
+cd /path/to/your/project
+```
+
+### 2. Initialize PRISM (Optional)
+
+PRISM can create a default configuration file:
+
+```bash
+prism init
+```
+
+This creates `.prism/config.yaml` with default settings:
+
+```yaml
+# PRISM Configuration
+indexing:
+  extensions:
+    - .ts
+    - .js
+    - .tsx
+    - .jsx
+    - .py
+    - .rs
+    - .go
+    - .java
+  exclude:
+    - node_modules/**
+    - .git/**
+    - dist/**
+    - build/**
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+
+embeddings:
+  provider: auto  # auto, cloudflare, ollama
+  model: bge-small-en-v1.5
+
+storage:
+  type: sqlite  # sqlite, vectorize
+  path: .prism/vectors.db
+
+chat:
+  budget: 50000
+  model: auto  # auto, ollama, haiku, sonnet, opus
+```
+
+### 3. Index Your Codebase
+
+```bash
+prism index
+```
+
+**Expected Output**:
+
+```
+Indexing /home/user/project...
+✓ Found 247 files matching criteria
+✓ Parsed 247 files (3.2s)
+✓ Extracted 3,456 code elements
+✓ Generated 3,456 embeddings (18.4s)
+✓ Indexed 3,456 chunks (1.2s)
+
+Index complete!
+Files: 247 | Chunks: 3,456 | Time: 22.8s
+Storage: .prism/vectors.db (12.4 MB)
+```
+
+**What's Happening**:
+1. PRISM scans your project for supported file types
+2. Tree-sitter (Rust WASM) parses code structure
+3. Functions, classes, and methods are extracted
+4. Cloudflare Workers AI generates embeddings (vectors)
+5. Vectors are stored in SQLite database
+
+---
+
 ## Your First Search
 
 ### Basic Semantic Search
@@ -729,11 +810,12 @@ cat ~/.prism/logs/error.log
 
 Now that you have PRISM installed and running:
 
-1. **Customize Configuration**: See [Configuration Guide](configuration.md)
-2. **Learn Advanced Usage**: See [Usage Guide](usage.md)
-3. **Explore Examples**: See [Examples](examples.md)
-4. **Read FAQ**: See [FAQ](faq.md)
-5. **Understand Architecture**: See [Architecture Docs](../architecture/)
+1. **Integrate with Claude Code**: See [MCP Integration Guide](../integration/mcp-setup.md)
+2. **Customize Configuration**: See [Configuration Guide](configuration.md)
+3. **Learn Advanced Usage**: See [Usage Guide](usage.md)
+4. **Explore Examples**: See [Examples](examples.md)
+5. **Read FAQ**: See [FAQ](faq.md)
+6. **Understand Architecture**: See [Architecture Docs](../architecture/)
 
 ---
 
@@ -741,7 +823,8 @@ Now that you have PRISM installed and running:
 
 - [ ] Installed PRISM globally
 - [ ] Verified installation (`prism --version`)
-- [ ] Configured API keys (if using cloud features)
+- [ ] Checked System Requirements
+- [ ] Initialized PRISM config (`prism init`) - optional
 - [ ] Indexed your codebase (`prism index`)
 - [ ] Performed first search (`prism search`)
 - [ ] Asked first question (`prism chat`)
@@ -750,6 +833,6 @@ Now that you have PRISM installed and running:
 
 ---
 
-**Document Status**: Complete
-**Last Updated**: 2026-01-13
+**Document Status**: Complete (Consolidated from user-guide)
+**Last Updated**: 2026-01-14
 **Version**: 0.1.0

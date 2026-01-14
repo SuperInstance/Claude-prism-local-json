@@ -96,8 +96,8 @@ git --version
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/claudes-friend.git
-cd claudes-friend
+git clone https://github.com/your-org/prism.git
+cd prism
 ```
 
 ### 2. Install Dependencies

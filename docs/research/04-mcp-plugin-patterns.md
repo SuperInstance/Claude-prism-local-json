@@ -1,6 +1,6 @@
 # MCP Plugin Integration Patterns for Claude Code
 
-**Research Document**: Comprehensive guide to Model Context Protocol (MCP) plugin development for Vantage super-agent plugin
+**Research Document**: Comprehensive guide to Model Context Protocol (MCP) plugin development for PRISM super-agent plugin
 
 **Date**: 2025-01-13
 **Version**: 1.0
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-The Model Context Protocol (MCP) is an open standard that enables AI applications to connect to external tools and data sources through a uniform, safe protocol. This document provides comprehensive research findings on MCP integration patterns, best practices, and architectural considerations for building Vantage as an MCP server plugin for Claude Code.
+The Model Context Protocol (MCP) is an open standard that enables AI applications to connect to external tools and data sources through a uniform, safe protocol. This document provides comprehensive research findings on MCP integration patterns, best practices, and architectural considerations for building PRISM as an MCP server plugin for Claude Code.
 
 **Key Findings:**
 - MCP uses JSON-RPC 2.0 over two transport mechanisms: STDIO (local) and Streamable HTTP (remote)
@@ -44,7 +44,7 @@ MCP follows a **client-server architecture** with three main participants:
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │  MCP Host       │─────▶│  MCP Client     │─────▶│  MCP Server     │
-│  (Claude Code)  │      │  (per server)   │      │  (Vantage)      │
+│  (Claude Code)  │      │  (per server)   │      │  (PRISM)      │
 └─────────────────┘      └─────────────────┘      └─────────────────┘
 ```
 

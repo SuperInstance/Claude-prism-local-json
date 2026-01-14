@@ -1,13 +1,13 @@
-# Tree-sitter + WASM Integration Research for Vantage
+# Tree-sitter + WASM Integration Research for PRISM
 
 **Research Date**: 2026-01-13
 **Researcher**: Claude (AI Research Agent)
 **Status**: Final
-**Project**: Vantage v0.1.0
+**Project**: PRISM v0.1.0
 
 ## Executive Summary
 
-This research document provides comprehensive findings on integrating Tree-sitter with WebAssembly (WASM) for the Vantage project's codebase indexing needs. Vantage requires indexing 100K+ LOC in seconds with support for TypeScript, JavaScript, Python, Rust, Go, and Java in mixed-language repositories.
+This research document provides comprehensive findings on integrating Tree-sitter with WebAssembly (WASM) for the PRISM project's codebase indexing needs. PRISM requires indexing 100K+ LOC in seconds with support for TypeScript, JavaScript, Python, Rust, Go, and Java in mixed-language repositories.
 
 **Key Findings:**
 - Tree-sitter has excellent grammar support for all target languages
@@ -24,7 +24,7 @@ This research document provides comprehensive findings on integrating Tree-sitte
 
 ### 1.1 Language Grammar Quality
 
-All priority languages for Vantage have excellent Tree-sitter grammar support:
+All priority languages for PRISM have excellent Tree-sitter grammar support:
 
 | Language | Grammar Status | Version | Quality Assessment |
 |----------|---------------|---------|-------------------|
@@ -196,15 +196,15 @@ wasm-pack build --target web --release
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub struct VantageParser {
+pub struct PRISMParser {
     parser: tree_sitter::Parser,
     // Add other fields
 }
 
 #[wasm_bindgen]
-impl VantageParser {
+impl PRISMParser {
     #[wasm_bindgen(constructor)]
-    pub fn new(language: &str) -> Result<VantageParser, JsValue> {
+    pub fn new(language: &str) -> Result<PRISMParser, JsValue> {
         let mut parser = tree_sitter::Parser::new();
         let language = match language {
             "typescript" => tree_sitter_typescript::language_typescript(),
@@ -215,7 +215,7 @@ impl VantageParser {
         parser.set_language(&language).map_err(|e| {
             JsValue::from_str(&format!("Failed to set language: {:?}", e))
         })?;
-        Ok(VantageParser { parser })
+        Ok(PRISMParser { parser })
     }
 
     // Explicit cleanup
@@ -232,13 +232,13 @@ impl VantageParser {
 
 ```javascript
 // Import the WASM module
-import init, { VantageParser } from './vantage_indexer.js';
+import init, { PRISMParser } from './vantage_indexer.js';
 
 let parser = null;
 
 async function initializeParser() {
     await init();
-    parser = new VantageParser('typescript');
+    parser = new PRISMParser('typescript');
 }
 
 // Clean up when done
@@ -300,7 +300,7 @@ function checkMemoryUsage() {
    - Fast enough for real-time syntax highlighting
    - Can parse on every keystroke
 
-**Recommendation for Vantage:**
+**Recommendation for PRISM:**
 - Use WASM for cross-platform compatibility
 - Expect ~45% performance penalty vs native
 - Still significantly faster than pure JavaScript parsers
@@ -661,7 +661,7 @@ pub fn estimate_tokens(text: &str) -> usize {
 | **Block-Level** | More balanced sizes | May break semantics | General indexing |
 | **Token-Based** | Precise control, fits embeddings | Loses semantic boundaries | Embedding generation |
 
-**Recommended Approach for Vantage:**
+**Recommended Approach for PRISM:**
 1. **Primary**: Function-level chunking (semantic preservation)
 2. **Fallback**: Token-based splitting for large functions
 3. **Overlap**: Include context (imports, parent class info)
@@ -879,7 +879,7 @@ pub fn chunk_with_closures(
 | **Documentation** | 1000-2000 tokens | 256 tokens |
 | **Code Generation** | 500-800 tokens | 100 tokens |
 
-**Recommendations for Vantage:**
+**Recommendations for PRISM:**
 
 1. **Baseline**: 512 tokens (industry standard)
 2. **For functions**: Use function boundaries, max 1000 tokens
@@ -1285,7 +1285,7 @@ quickcheck = "1.0"     # Property testing
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum VantageError {
+pub enum PRISMError {
     #[error("Tree-sitter parse error: {0}")]
     ParseError(String),
 
@@ -1303,14 +1303,14 @@ pub enum VantageError {
 }
 
 // Convert to JsValue for WASM
-impl From<VantageError> for wasm_bindgen::JsValue {
-    fn from(error: VantageError) -> Self {
+impl From<PRISMError> for wasm_bindgen::JsValue {
+    fn from(error: PRISMError) -> Self {
         wasm_bindgen::JsValue::from_str(&error.to_string())
     }
 }
 
 // Result type alias
-pub type Result<T> = std::result::Result<T, VantageError>;
+pub type Result<T> = std::result::Result<T, PRISMError>;
 ```
 
 **Usage in Functions:**
@@ -1319,10 +1319,10 @@ pub type Result<T> = std::result::Result<T, VantageError>;
 #[wasm_bindgen]
 pub fn parse_code(code: &str, language: &str) -> Result<ParsedCode, JsValue> {
     let parser = create_parser(language)
-        .map_err(|e| VantageError::UnsupportedLanguage(e.to_string()))?;
+        .map_err(|e| PRISMError::UnsupportedLanguage(e.to_string()))?;
 
     let tree = parser.parse(code, None)
-        .ok_or_else(|| VantageError::ParseError("Failed to parse".to_string()))?;
+        .ok_or_else(|| PRISMError::ParseError("Failed to parse".to_string()))?;
 
     Ok(extract_code_info(&tree, code))
 }
@@ -1519,13 +1519,13 @@ fn debug_print(_msg: &str) {
 // Each exported function adds overhead
 
 #[wasm_bindgen]
-pub struct VantageIndexer {
+pub struct PRISMIndexer {
     // Internal state
 }
 
 // Export only necessary methods
 #[wasm_bindgen]
-impl VantageIndexer {
+impl PRISMIndexer {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self { /* ... */ }
 
@@ -1540,12 +1540,12 @@ impl VantageIndexer {
 **Expected WASM Size:**
 - Base Tree-sitter: ~200 KB
 - Language grammars: ~50-100 KB each
-- Vantage code: ~50-100 KB
+- PRISM code: ~50-100 KB
 - **Total**: ~500 KB - 1 MB (with all languages)
 
 ---
 
-## 7. Recommendations for Vantage Implementation
+## 7. Recommendations for PRISM Implementation
 
 ### 7.1 Architecture Recommendations
 
@@ -1661,7 +1661,7 @@ const parserWeakRef = new WeakRef(parser);
 const MAX_FILE_SIZE: usize = 1_000_000; // 1MB
 
 if content.len() > MAX_FILE_SIZE {
-    return Err(VantageError::FileTooLarge);
+    return Err(PRISMError::FileTooLarge);
 }
 
 // Or parse in chunks
@@ -1793,15 +1793,15 @@ use tree_sitter::Parser;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub struct VantageParser {
+pub struct PRISMParser {
     parser: Parser,
     language_name: String,
 }
 
 #[wasm_bindgen]
-impl VantageParser {
+impl PRISMParser {
     #[wasm_bindgen(constructor)]
-    pub fn new(language: &str) -> Result<VantageParser, JsValue> {
+    pub fn new(language: &str) -> Result<PRISMParser, JsValue> {
         let mut parser = Parser::new();
 
         let language = match language {
@@ -1817,7 +1817,7 @@ impl VantageParser {
         parser.set_language(&language)
             .map_err(|e| JsValue::from_str(&format!("Failed to set language: {:?}", e)))?;
 
-        Ok(VantageParser {
+        Ok(PRISMParser {
             parser,
             language_name: language.to_string(),
         })
@@ -1988,7 +1988,7 @@ impl CodeChunker {
 
 ## 10. Conclusion
 
-This research confirms that **Tree-sitter + WASM is the right choice for Vantage's codebase indexing needs**. The technology stack provides:
+This research confirms that **Tree-sitter + WASM is the right choice for PRISM's codebase indexing needs**. The technology stack provides:
 
 - **Excellent language support** for all target languages
 - **Production-ready performance** even with WASM overhead

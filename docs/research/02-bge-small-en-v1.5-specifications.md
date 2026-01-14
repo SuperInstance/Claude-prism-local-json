@@ -131,7 +131,7 @@ From the C-Pack paper (arXiv:2309.07597):
 - **Commercial Use**: Free for commercial purposes
 - **Source**: Hugging Face model card and GitHub repository
 
-## Recommendations for Vantage
+## Recommendations for PRISM
 
 ### Advantages
 1. **Size**: 384 dimensions is efficient for storage and computation
@@ -161,6 +161,6 @@ From the C-Pack paper (arXiv:2309.07597):
 
 ## Conclusion
 
-BGE-small-en-v1.5 is a well-documented, efficient embedding model suitable for Vantage's token optimization goals. Its 384-dimensional output strikes a good balance between performance and storage efficiency, making it ideal for Cloudflare's free tier constraints. The model's strong retrieval performance (51.68 on MTEB Retrieval tasks) and availability through Cloudflare Workers AI make it a solid choice for the MVP implementation.
+BGE-small-en-v1.5 is a well-documented, efficient embedding model suitable for PRISM's token optimization goals. Its 384-dimensional output strikes a good balance between performance and storage efficiency, making it ideal for Cloudflare's free tier constraints. The model's strong retrieval performance (51.68 on MTEB Retrieval tasks) and availability through Cloudflare Workers AI make it a solid choice for the MVP implementation.
 
 **Next Steps**: Compare with code-specific embedding models (CodeBERT, GraphCodeBERT) to determine if domain-specific models offer better performance for code retrieval tasks.

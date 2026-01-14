@@ -1,13 +1,13 @@
 # Data Flow Architecture
 
-**Component**: Vantage Data Flow Specification
+**Component**: PRISM Data Flow Specification
 **Status**: Design Document
 **Priority**: Foundational
 **Last Updated**: 2026-01-13
 
 ## Purpose
 
-This document specifies all major data flows in the Vantage system, including query processing, indexing, synchronization, and error handling. Each flow includes ASCII diagrams, step-by-step descriptions, and key decision points.
+This document specifies all major data flows in the PRISM system, including query processing, indexing, synchronization, and error handling. Each flow includes ASCII diagrams, step-by-step descriptions, and key decision points.
 
 ---
 
@@ -531,7 +531,7 @@ function reconstructPrompt(
   }
 
   // Build system prompt
-  const system = `You are Claude Code with Vantage super-agent capabilities.
+  const system = `You are Claude Code with PRISM super-agent capabilities.
 
 CONTEXT:
 The following code snippets are the most relevant parts of the codebase for this query.
@@ -1456,7 +1456,7 @@ async function handleNetworkError(error: Error, operation: string): Promise<any>
   }
 
   // No fallback available
-  throw new VantageError(
+  throw new PRISMError(
     'Network operation failed',
     { category: ErrorCategory.NETWORK, severity: ErrorSeverity.HIGH }
   );

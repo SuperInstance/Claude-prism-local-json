@@ -84,6 +84,7 @@ See: 📄 [ROUND3_BUILD_GUIDE.md](./ROUND3_BUILD_GUIDE.md)
 | Model Router | LLM selection strategy | [architecture/03-model-router.md](./architecture/03-model-router.md) |
 | Indexer Architecture | Code parsing and chunking | [architecture/04-indexer-architecture.md](./architecture/04-indexer-architecture.md) |
 | MCP Plugin Spec | Claude Code integration | [architecture/05-mcp-plugin-spec.md](./architecture/05-mcp-plugin-spec.md) |
+| MCP Integration Guide | MCP server setup and usage | [../prism/docs/mcp-integration.md](../prism/docs/mcp-integration.md) |
 
 ### Round 3 Architecture
 
@@ -165,7 +166,7 @@ Complete documentation for contributors:
 ### Project Structure
 
 ```
-claudes-friend/
+prism/
 ├── prism/                    # Rust/WASM modules
 │   └── prism-indexer/        # Code parser
 ├── src/                      # TypeScript source

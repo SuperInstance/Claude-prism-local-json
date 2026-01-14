@@ -1,10 +1,10 @@
-# Claude's Friend - System Architecture
+# PRISM - System Architecture
 
 A Cloudflare Worker-powered AI companion for Claude Code that maximizes free tier usage.
 
 ## Project Overview
 
-**Claude's Friend** is a serverless AI assistant built entirely on Cloudflare's free tier, designed to integrate with Claude Code and provide:
+**PRISM** is a serverless AI assistant built entirely on Cloudflare's free tier, designed to integrate with Claude Code and provide:
 
 - **RAG-powered code assistance** - Search and retrieve relevant code context
 - **Document management** - Store, index, and query documentation

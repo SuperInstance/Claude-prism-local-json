@@ -446,7 +446,7 @@ function reconstructPrompt(
   }
 
   // Build system prompt
-  const system = `You are Claude Code with Vantage super-agent capabilities.
+  const system = `You are Claude Code with PRISM super-agent capabilities.
 
 CONTEXT:
 The following code snippets are the most relevant parts of the codebase for this query.

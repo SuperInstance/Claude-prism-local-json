@@ -1,13 +1,13 @@
 # Getting Started - Development Guide
 
-**Component**: Vantage Development Guide
+**Component**: PRISM Development Guide
 **Status**: Development Document
 **Priority**: Foundational
 **Last Updated**: 2026-01-13
 
 ## Purpose
 
-This document provides comprehensive guidance for setting up a development environment, understanding the codebase, contributing to the project, and following best practices for Vantage development.
+This document provides comprehensive guidance for setting up a development environment, understanding the codebase, contributing to the project, and following best practices for PRISM development.
 
 ---
 
@@ -161,7 +161,7 @@ LOG_LEVEL=info
 # Navigate to a test project
 cd /path/to/your/project
 
-# Initialize Vantage
+# Initialize PRISM
 prism init
 
 # Index the codebase
@@ -367,7 +367,7 @@ Defines Node.js dependencies and scripts:
 {
   "name": "@vantage/cli",
   "version": "0.1.0",
-  "description": "Vantage - Token-efficient code search with AI",
+  "description": "PRISM - Token-efficient code search with AI",
   "main": "dist/index.js",
   "bin": {
     "prism": "./dist/cli/index.js"
@@ -720,7 +720,7 @@ NODE_OPTIONS='--trace-warnings' prism index
 - Discord: (link if available)
 
 **When reporting issues**, include:
-- Vantage version: `prism --version`
+- PRISM version: `prism --version`
 - Node.js version: `node --version`
 - Operating system
 - Error message

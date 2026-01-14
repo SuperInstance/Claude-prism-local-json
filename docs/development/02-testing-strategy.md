@@ -1,13 +1,13 @@
 # Testing Strategy
 
-**Component**: Vantage Testing Strategy
+**Component**: PRISM Testing Strategy
 **Status**: Development Document
 **Priority**: Foundational
 **Last Updated**: 2026-01-13
 
 ## Purpose
 
-This document defines the comprehensive testing strategy for Vantage, including unit testing, integration testing, performance testing, and quality gates. All tests are designed to ensure reliability, performance, and maintainability.
+This document defines the comprehensive testing strategy for PRISM, including unit testing, integration testing, performance testing, and quality gates. All tests are designed to ensure reliability, performance, and maintainability.
 
 ---
 
@@ -292,7 +292,7 @@ mod tests {
 ```typescript
 // tests/integration/indexer.integration.test.ts
 describe('Indexer Integration', () => {
-  let indexer: VantageIndexer;
+  let indexer: PRISMIndexer;
   let testRepoPath: string;
 
   beforeAll(async () => {
@@ -305,7 +305,7 @@ describe('Indexer Integration', () => {
     });
 
     // Initialize indexer
-    indexer = new VantageIndexer();
+    indexer = new PRISMIndexer();
     await indexer.initialize();
   });
 
