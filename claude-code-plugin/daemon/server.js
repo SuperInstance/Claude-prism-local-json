@@ -1,38 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * PRISM Background Daemon
- * Provides enhanced project memory for Claude Code through background operations
+ * PRISM Simple Daemon
+ * Provides basic project memory for Claude Code
  */
 
 const fs = require('fs').promises;
 const path = require('path');
 const http = require('http');
-const { EventEmitter } = require('events');
 const ProjectDetector = require('./project-detector');
 
-class PrismDaemon extends EventEmitter {
+class SimplePrismDaemon {
   constructor() {
-    super();
-
-    // Configuration from environment variables
     this.config = {
-      pluginRoot: process.env.PLUGIN_ROOT || process.cwd(),
+      port: parseInt(process.env.PORT) || 8080,
       projectRoot: process.env.PROJECT_ROOT || process.cwd(),
-      cacheDir: process.env.CACHE_DIR || path.join(process.cwd(), 'cache'),
-      indexDir: process.env.INDEX_DIR || path.join(process.cwd(), 'index'),
-      logLevel: process.env.LOG_LEVEL || 'info',
-      port: parseInt(process.env.PORT) || 8080
+      logLevel: process.env.LOG_LEVEL || 'info'
     };
 
-    // State management
-    this.isRunning = false;
+    this.server = http.createServer(this.handleRequest.bind(this));
     this.projectInfo = null;
-    this.indexingQueue = [];
-    this.isIndexing = false;
-
-    // Initialize server
-    this.server = http.createServer(this.requestHandler.bind(this));
+    this.isRunning = false;
   }
 
   /**
@@ -40,38 +28,11 @@ class PrismDaemon extends EventEmitter {
    */
   async initialize() {
     try {
-      // Ensure directories exist
-      await this.ensureDirectories();
-
-      // Auto-discover project structure
       await this.discoverProject();
-
-      // Set up file system watcher for changes
-      this.setupFileWatcher();
-
-      console.log(`[PRISM Daemon] Initialized successfully`);
-      console.log(`[PRISM Daemon] Project: ${this.projectInfo?.name || 'Unknown'}`);
-      console.log(`[PRISM Daemon] Language: ${this.projectInfo?.language || 'Unknown'}`);
-
+      console.log(`[PRISM] Project: ${this.projectInfo?.name || 'Unknown'} (${this.projectInfo?.language || 'unknown'})`);
     } catch (error) {
-      console.error('[PRISM Daemon] Initialization failed:', error);
+      console.error('[PRISM] Initialization failed:', error.message);
       throw error;
-    }
-  }
-
-  /**
-   * Ensure required directories exist
-   */
-  async ensureDirectories() {
-    const dirs = [this.config.cacheDir, this.config.indexDir];
-    for (const dir of dirs) {
-      try {
-        await fs.mkdir(dir, { recursive: true });
-      } catch (error) {
-        if (error.code !== 'EEXIST') {
-          throw error;
-        }
-      }
     }
   }
 
@@ -80,35 +41,13 @@ class PrismDaemon extends EventEmitter {
    */
   async discoverProject() {
     try {
-      // Use enhanced project detector
       const detector = new ProjectDetector(this.config.projectRoot);
       this.projectInfo = await detector.detectAll();
-
-      console.log(`[PRISM Daemon] Project detected: ${this.projectInfo.language}/${this.projectInfo.framework || 'unknown'}`);
-      console.log(`[PRISM Daemon] Dependencies: ${this.projectInfo.dependencies.length} main, ${this.projectInfo.devDependencies.length} dev`);
-      console.log(`[PRISM Daemon] Build tools: ${this.projectInfo.buildTools.join(', ') || 'none'}`);
-      console.log(`[PRISM Daemon] Test frameworks: ${this.projectInfo.testFrameworks.join(', ') || 'none'}`);
-
-      // Emit discovery event
-      this.emit('projectDiscovered', this.projectInfo);
-
     } catch (error) {
-      console.error('[PRISM Daemon] Project discovery failed:', error);
-      // Set default project info
       this.projectInfo = {
-        root: this.config.projectRoot,
         name: path.basename(this.config.projectRoot),
-        type: 'generic',
         language: 'unknown',
-        dependencies: [],
-        devDependencies: [],
-        scripts: {},
-        buildTools: [],
-        testFrameworks: [],
-        lintingTools: [],
-        directories: {},
-        configFiles: [],
-        files: []
+        type: 'generic'
       };
     }
   }

@@ -9,5 +9,15 @@
   "commands": ["./commands/"],
   "agents": ["./agents/"],
   "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json"
+  "autoStart": true,
+  "permissions": {
+    "files": "read",
+    "network": "true",
+    "environment": "true"
+  },
+  "features": {
+    "autoDetect": true,
+    "zeroConfig": true,
+    "crossPlatform": true
+  }
 }

@@ -62,7 +62,7 @@ describe('PRISM Daemon', () => {
       on: jest.fn()
     };
     const res = {
-     .writeHead: jest.fn(),
+      writeHead: jest.fn(),
       end: jest.fn()
     };
 
