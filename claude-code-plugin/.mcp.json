@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "prism-daemon": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/daemon/server.js"],
+      "env": {
+        "PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}",
+        "PROJECT_ROOT": "${PROJECT_ROOT:-${CLAUDE_PLUGIN_ROOT}}",
+        "CACHE_DIR": "${CLAUDE_PLUGIN_ROOT}/cache",
+        "INDEX_DIR": "${CLAUDE_PLUGIN_ROOT}/index",
+        "LOG_LEVEL": "${LOG_LEVEL:-info}"
+      }
+    }
+  }
+}

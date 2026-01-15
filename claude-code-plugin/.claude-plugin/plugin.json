@@ -1,0 +1,13 @@
+{
+  "name": "prism-project-memory",
+  "version": "1.0.0",
+  "description": "Enhanced project memory for Claude Code with semantic search and context awareness",
+  "author": {
+    "name": "PRISM Team",
+    "email": "team@claude-prism.dev"
+  },
+  "commands": ["./commands/"],
+  "agents": ["./agents/"],
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}

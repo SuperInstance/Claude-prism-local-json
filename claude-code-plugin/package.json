@@ -1,0 +1,53 @@
+{
+  "name": "prism-project-memory",
+  "version": "1.0.0",
+  "description": "Enhanced project memory for Claude Code with semantic search and context awareness",
+  "main": "daemon/server.js",
+  "scripts": {
+    "start": "node daemon/server.js",
+    "dev": "nodemon daemon/server.js",
+    "build": "node scripts/build.js",
+    "deploy": "node scripts/deploy.js",
+    "test": "node test/run-all.js"
+  },
+  "keywords": [
+    "claude",
+    "plugin",
+    "code-search",
+    "memory",
+    "context",
+    "semantic-search",
+    "development",
+    "productivity"
+  ],
+  "author": {
+    "name": "PRISM Team",
+    "email": "team@claude-prism.dev"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SuperInstance/Claude-prism-local-json.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SuperInstance/Claude-prism-local-json/issues"
+  },
+  "homepage": "https://github.com/SuperInstance/Claude-prism-local-json#readme",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "files": [
+    ".claude-plugin",
+    ".mcp.json",
+    "daemon/",
+    "commands/",
+    "agents/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ]
+}
