@@ -180,18 +180,20 @@ class PrismDaemon {
   }
 }
 
-// Handle graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('[PRISM] Shutting down...');
-  await daemon.stop();
-  process.exit(0);
-});
+// Handle graceful shutdown (only if daemon is defined)
+if (typeof daemon !== 'undefined') {
+  process.on('SIGTERM', async () => {
+    console.log('[PRISM] Shutting down...');
+    await daemon.stop();
+    process.exit(0);
+  });
 
-process.on('SIGINT', async () => {
-  console.log('[PRISM] Shutting down...');
-  await daemon.stop();
-  process.exit(0);
-});
+  process.on('SIGINT', async () => {
+    console.log('[PRISM] Shutting down...');
+    await daemon.stop();
+    process.exit(0);
+  });
+}
 
 module.exports = PrismDaemon;
 
